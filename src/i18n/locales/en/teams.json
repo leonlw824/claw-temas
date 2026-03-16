@@ -1,0 +1,76 @@
+{
+    "title": "Teams",
+    "pageTitle": "Team List",
+    "subtitle": "Create and manage teams with workflow configurations.",
+    "newTeam": "New Team",
+    "refresh": "Refresh",
+    "noTeams": "No teams yet",
+    "teamCard": {
+        "members": "Members",
+        "createdAt": "Created",
+        "edit": "Edit",
+        "rename": "Rename",
+        "delete": "Delete",
+        "createTask": "Create Task",
+        "emptyWorkflow": "No workflow configured"
+    },
+    "createDialog": {
+        "title": "Create Team",
+        "description": "Design team workflow by dragging employees and connecting them.",
+        "nameLabel": "Team Name",
+        "namePlaceholder": "Enter team name...",
+        "employeeList": "Employee List",
+        "workspace": "Workspace",
+        "noEmployees": "No employees available",
+        "addDescription": "Add description to connection",
+        "descriptionPlaceholder": "Enter connection description..."
+    },
+    "editDialog": {
+        "title": "Edit Team",
+        "description": "Modify team workflow configuration.",
+        "workflowEditorPlaceholder": "Workflow editor will be implemented here"
+    },
+    "renameDialog": {
+        "title": "Rename Team",
+        "description": "Enter a new name for the team.",
+        "nameLabel": "Team Name",
+        "namePlaceholder": "Enter new team name..."
+    },
+    "deleteDialog": {
+        "title": "Delete Team",
+        "message": "Are you sure you want to delete team \"{{name}}\"? This action cannot be undone."
+    },
+    "workflowEditor": {
+        "agentList": "Employee List",
+        "agents": "agents",
+        "connections": "connections",
+        "connectingMode": "Connecting",
+        "dragAgents": "Drag employees here to build workflow",
+        "connect": "Connect",
+        "remove": "Remove",
+        "editConnection": "Edit Connection",
+        "editConnectionDescription": "Set what is delivered through this connection.",
+        "instruction": "Instruction",
+        "instructionPlaceholder": "Enter instruction for the next agent...",
+        "enableRollback": "Enable Rollback",
+        "deliverable": "Deliverable",
+        "deliverablePlaceholder": "Enter what is delivered to next agent...",
+        "removeConnection": "Remove Connection",
+        "agentAlreadyAdded": "This employee is already in the workflow",
+        "connectionExists": "Connection already exists",
+        "endNode": "END",
+        "cannotRemoveEndNode": "Cannot remove END node",
+        "mustConnectToEnd": "Must connect at least one agent to the END node",
+        "nodesNotConnected": "The following agents are not connected: {{agents}}. Please add connections for them"
+    },
+    "toast": {
+        "teamCreated": "Team created successfully",
+        "teamCreateFailed": "Failed to create team: {{error}}",
+        "teamUpdated": "Team updated successfully",
+        "teamUpdateFailed": "Failed to update team: {{error}}",
+        "teamDeleted": "Team deleted successfully",
+        "teamDeleteFailed": "Failed to delete team: {{error}}",
+        "enterTeamName": "Please enter a team name",
+        "workflowEditorNotImplemented": "Workflow editor will be implemented"
+    }
+}

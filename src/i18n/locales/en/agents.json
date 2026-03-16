@@ -1,0 +1,63 @@
+{
+    "title": "Agents",
+    "pageTitle": "Employee List",
+    "subtitle": "When adding a new Agent, ClawTeams will copy the main Agent's workspace files and runtime auth setup. The configuration can be modified through a dialog.",
+    "refresh": "Refresh",
+    "addAgent": "Add Agent",
+    "gatewayWarning": "Gateway service is not running. Agent/channel changes may take a moment to apply.",
+    "defaultBadge": "default",
+    "inherited": "inherited",
+    "none": "none",
+    "modelLine": "Model: {{model}}{{suffix}}",
+    "channelsLine": "Channels: {{channels}}",
+    "deleteAgent": "Delete Agent",
+    "settings": "Settings",
+    "chatWithAgent": "Chat",
+    "creating": "Creating...",
+    "createDialog": {
+        "title": "Add Agent",
+        "description": "Create a new agent by name. ClawTeams will copy the main agent's workspace bootstrap files and runtime auth setup.",
+        "nameLabel": "Agent Name",
+        "namePlaceholder": "Coding Helper"
+    },
+    "deleteDialog": {
+        "title": "Delete Agent",
+        "message": "Delete \"{{name}}\" from ClawTeams? This permanently deletes the agent and its ClawTeams-managed workspace, runtime, and session files from disk."
+    },
+    "settingsDialog": {
+        "title": "{{name}} Settings",
+        "description": "Update the agent name and manage which channels belong to this agent.",
+        "nameLabel": "Agent Name",
+        "agentIdLabel": "Agent ID",
+        "modelLabel": "Model",
+        "modelPlaceholder": "Select or enter model name",
+        "avatarLabel": "Avatar",
+        "avatarUpload": "Upload Avatar",
+        "avatarDescription": "Upload a personal photo as avatar",
+        "soulLabel": "Personal Introduction",
+        "soulDescription": "Edit personal introduction content (SOUL.md)",
+        "soulPlaceholder": "Enter personal introduction...",
+        "behaviorLabel": "Behavior Guidelines",
+        "behaviorDescription": "Edit behavior guidelines content (AGENTS.md)",
+        "behaviorPlaceholder": "Enter behavior guidelines...",
+        "channelsTitle": "Channels",
+        "channelsDescription": "Each channel type has a single ClawTeams configuration. Saving a configured channel here moves ownership to this agent.",
+        "addChannel": "Add Channel",
+        "noChannels": "No channels are assigned to this agent yet."
+    },
+    "removeChannelDialog": {
+        "title": "Remove Channel",
+        "message": "Remove {{name}} from ClawTeams? This deletes the current channel configuration."
+    },
+    "toast": {
+        "agentCreated": "Agent created",
+        "agentCreateFailed": "Failed to create agent: {{error}}",
+        "agentDeleted": "Agent deleted",
+        "agentUpdated": "Agent updated",
+        "agentUpdateFailed": "Failed to update agent: {{error}}",
+        "channelAssigned": "{{channel}} assigned to agent",
+        "channelAssignFailed": "Failed to assign channel: {{error}}",
+        "channelRemoved": "{{channel}} removed",
+        "channelRemoveFailed": "Failed to remove channel: {{error}}"
+    }
+}

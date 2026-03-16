@@ -1,0 +1,40 @@
+{
+    "gatewayNotRunning": "Gateway Not Running",
+    "gatewayRequired": "The OpenClaw Gateway needs to be running to use chat. It will start automatically, or you can start it from Settings.",
+    "welcome": {
+        "title": "ClawTeams Chat",
+        "subtitle": "Your AI assistant is ready. Start a conversation below.",
+        "askQuestions": "Ask Questions",
+        "askQuestionsDesc": "Get answers on any topic",
+        "creativeTasks": "Creative Tasks",
+        "creativeTasksDesc": "Writing, brainstorming, ideas"
+    },
+    "noLogs": "(No logs available yet)",
+    "toolbar": {
+        "refresh": "Refresh chat",
+        "showThinking": "Show thinking",
+        "hideThinking": "Hide thinking",
+        "currentAgent": "Talking to {{agent}}"
+    },
+    "composer": {
+        "attachFiles": "Attach files",
+        "pickAgent": "Choose agent",
+        "clearTarget": "Clear target agent",
+        "targetChip": "@{{agent}}",
+        "agentPickerTitle": "Route the next message to another agent",
+        "gatewayDisconnectedPlaceholder": "Gateway not connected...",
+        "send": "Send",
+        "stop": "Stop",
+        "gatewayConnected": "connected",
+        "gatewayStatus": "gateway {{state}} | port: {{port}} {{pid}}",
+        "retryFailedAttachments": "Retry failed attachments"
+    },
+    "historyBuckets": {
+        "today": "Today",
+        "yesterday": "Yesterday",
+        "withinWeek": "Within 1 Week",
+        "withinTwoWeeks": "Within 2 Weeks",
+        "withinMonth": "Within 1 Month",
+        "older": "Older than 1 Month"
+    }
+}

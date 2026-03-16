@@ -1,0 +1,98 @@
+{
+    "title": "任务",
+    "pageTitle": "任务管理",
+    "subtitle": "基于团队工作流创建和管理任务。",
+    "newTask": "新建任务",
+    "refresh": "刷新",
+    "noTasks": "暂无任务",
+    "statistics": {
+        "total": "总计",
+        "waiting": "待开始",
+        "pending": "等待中",
+        "running": "运行中",
+        "completed": "已完成",
+        "failed": "失败",
+        "stopped": "已停止"
+    },
+    "taskCard": {
+        "team": "团队",
+        "type": "类型",
+        "workspace": "工作空间",
+        "status": "状态",
+        "createdAt": "创建时间",
+        "updatedAt": "更新时间",
+        "startedAt": "开始时间",
+        "completedAt": "完成时间",
+        "executionTime": "运行时长",
+        "start": "启动",
+        "stop": "停止",
+        "resume": "恢复",
+        "reExecute": "再次执行",
+        "viewResult": "查看结果",
+        "viewLogs": "查看日志",
+        "delete": "删除",
+        "openLocation": "打开位置",
+        "openWorkspace": "打开工作空间文件夹",
+        "currentNodes": "当前工作节点",
+        "clickToViewChat": "点击查看会话"
+    },
+    "taskTypes": {
+        "file": "文件",
+        "app": "应用(内置)"
+    },
+    "createDialog": {
+        "title": "新建任务",
+        "description": "基于团队工作流创建新任务。",
+        "nameLabel": "任务名称",
+        "namePlaceholder": "输入任务名称...",
+        "descriptionLabel": "任务描述",
+        "descriptionPlaceholder": "输入任务描述...",
+        "typeLabel": "任务类型",
+        "typePlaceholder": "选择任务类型",
+        "teamLabel": "选择团队",
+        "teamPlaceholder": "选择一个团队",
+        "noTeams": "暂无可用团队。请先创建团队。"
+    },
+    "deleteDialog": {
+        "title": "删除任务",
+        "message": "确认删除任务 \"{{name}}\"？此操作无法撤销。"
+    },
+    "logsDialog": {
+        "title": "任务日志：{{name}}",
+        "noLogs": "暂无日志"
+    },
+    "resultDialog": {
+        "title": "任务结果：{{name}}",
+        "noResult": "暂无结果"
+    },
+    "reExecuteDialog": {
+        "title": "再次执行任务",
+        "description": "修改任务描述后再次执行。"
+    },
+    "status": {
+        "waiting": "待开始",
+        "pending": "等待中",
+        "running": "运行中",
+        "completed": "已完成",
+        "failed": "失败",
+        "stopped": "已停止"
+    },
+    "toast": {
+        "taskCreated": "任务创建成功",
+        "taskCreateFailed": "创建任务失败：{{error}}",
+        "taskDeleted": "任务删除成功",
+        "taskDeleteFailed": "删除任务失败：{{error}}",
+        "taskStarted": "任务已启动",
+        "taskStartFailed": "启动任务失败：{{error}}",
+        "taskStopped": "任务已停止",
+        "taskStopFailed": "停止任务失败：{{error}}",
+        "taskResumed": "任务已恢复执行",
+        "taskResumeFailed": "恢复任务失败：{{error}}",
+        "taskReExecuted": "任务已重新创建并开始执行",
+        "taskReExecuteFailed": "重新执行任务失败：{{error}}",
+        "fillAllFields": "请填写所有字段",
+        "selectType": "请选择任务类型",
+        "noWorkspacePath": "该任务没有工作空间路径",
+        "openWorkspaceFailed": "打开工作空间失败：{{error}}"
+    }
+}

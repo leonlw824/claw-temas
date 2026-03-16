@@ -1,0 +1,76 @@
+{
+    "title": "チーム",
+    "pageTitle": "チームリスト",
+    "subtitle": "ワークフロー構成を持つチームを作成および管理します。",
+    "newTeam": "新規チーム",
+    "refresh": "更新",
+    "noTeams": "チームがありません",
+    "teamCard": {
+        "members": "メンバー",
+        "createdAt": "作成日時",
+        "edit": "編集",
+        "rename": "名前変更",
+        "delete": "削除",
+        "createTask": "タスク作成",
+        "emptyWorkflow": "ワークフローが未設定"
+    },
+    "createDialog": {
+        "title": "チーム作成",
+        "description": "従業員をドラッグして接続することでチームワークフローをデザインします。",
+        "nameLabel": "チーム名",
+        "namePlaceholder": "チーム名を入力...",
+        "employeeList": "従業員リスト",
+        "workspace": "ワークスペース",
+        "noEmployees": "利用可能な従業員がありません",
+        "addDescription": "接続の説明を追加",
+        "descriptionPlaceholder": "接続の説明を入力..."
+    },
+    "editDialog": {
+        "title": "チーム編集",
+        "description": "チームワークフロー構成を変更します。",
+        "workflowEditorPlaceholder": "ワークフローエディターはここに実装されます"
+    },
+    "renameDialog": {
+        "title": "チーム名変更",
+        "description": "チームの新しい名前を入力してください。",
+        "nameLabel": "チーム名",
+        "namePlaceholder": "新しいチーム名を入力..."
+    },
+    "deleteDialog": {
+        "title": "チーム削除",
+        "message": "チーム \"{{name}}\" を削除してもよろしいですか？この操作は元に戻せません。"
+    },
+    "workflowEditor": {
+        "agentList": "従業員リスト",
+        "agents": "人の従業員",
+        "connections": "個の接続",
+        "connectingMode": "接続モード",
+        "dragAgents": "従業員をここにドラッグしてワークフローを構築",
+        "connect": "接続",
+        "remove": "削除",
+        "editConnection": "接続の編集",
+        "editConnectionDescription": "この接続を通じて配信される内容を設定します。",
+        "instruction": "指示",
+        "instructionPlaceholder": "次の従業員への指示を入力...",
+        "enableRollback": "ロールバックを有効化",
+        "deliverable": "成果物",
+        "deliverablePlaceholder": "次の従業員に渡す内容を入力...",
+        "removeConnection": "接続を削除",
+        "agentAlreadyAdded": "この従業員は既にワークフローに含まれています",
+        "connectionExists": "接続は既に存在します",
+        "endNode": "終了",
+        "cannotRemoveEndNode": "終了ノードは削除できません",
+        "mustConnectToEnd": "少なくとも1人の従業員を終了ノードに接続する必要があります",
+        "nodesNotConnected": "次の従業員は接続されていません：{{agents}}。接続を追加してください"
+    },
+    "toast": {
+        "teamCreated": "チームが作成されました",
+        "teamCreateFailed": "チームの作成に失敗しました：{{error}}",
+        "teamUpdated": "チームが更新されました",
+        "teamUpdateFailed": "チームの更新に失敗しました：{{error}}",
+        "teamDeleted": "チームが削除されました",
+        "teamDeleteFailed": "チームの削除に失敗しました：{{error}}",
+        "enterTeamName": "チーム名を入力してください",
+        "workflowEditorNotImplemented": "ワークフローエディターは実装予定です"
+    }
+}

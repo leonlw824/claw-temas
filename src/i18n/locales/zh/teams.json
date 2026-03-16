@@ -1,0 +1,76 @@
+{
+    "title": "团队",
+    "pageTitle": "团队列表",
+    "subtitle": "创建和管理具有工作流程配置的团队。",
+    "newTeam": "新建团队",
+    "refresh": "刷新",
+    "noTeams": "暂无团队",
+    "teamCard": {
+        "members": "成员",
+        "createdAt": "创建时间",
+        "edit": "编辑",
+        "rename": "修改名称",
+        "delete": "删除",
+        "createTask": "创建任务",
+        "emptyWorkflow": "未配置工作流"
+    },
+    "createDialog": {
+        "title": "新建团队",
+        "description": "通过拖拽员工并连接它们来设计团队工作流。",
+        "nameLabel": "团队名称",
+        "namePlaceholder": "输入团队名称...",
+        "employeeList": "员工列表",
+        "workspace": "工作空间",
+        "noEmployees": "暂无可用员工",
+        "addDescription": "添加连线描述",
+        "descriptionPlaceholder": "输入连线描述..."
+    },
+    "editDialog": {
+        "title": "编辑团队",
+        "description": "修改团队工作流配置。",
+        "workflowEditorPlaceholder": "工作流编辑器将在此处实现"
+    },
+    "renameDialog": {
+        "title": "重命名团队",
+        "description": "为团队输入新名称。",
+        "nameLabel": "团队名称",
+        "namePlaceholder": "输入新团队名称..."
+    },
+    "deleteDialog": {
+        "title": "删除团队",
+        "message": "确认删除团队 \"{{name}}\"？此操作无法撤销。"
+    },
+    "workflowEditor": {
+        "agentList": "员工列表",
+        "agents": "个员工",
+        "connections": "个连接",
+        "connectingMode": "连接模式",
+        "dragAgents": "拖拽员工到此处构建工作流",
+        "connect": "连接",
+        "remove": "移除",
+        "editConnection": "编辑连接",
+        "editConnectionDescription": "设置此连接传递的内容。",
+        "instruction": "指示",
+        "instructionPlaceholder": "输入传递给下一个员工的指示...",
+        "enableRollback": "启用回退",
+        "deliverable": "交付备注",
+        "deliverablePlaceholder": "输入传递给下一个员工的内容...",
+        "removeConnection": "删除连接",
+        "agentAlreadyAdded": "该员工已在工作流中",
+        "connectionExists": "连接已存在",
+        "endNode": "结束",
+        "cannotRemoveEndNode": "不能删除结束节点",
+        "mustConnectToEnd": "必须至少有一个员工连接到结束节点",
+        "nodesNotConnected": "以下员工没有连线：{{agents}}，请为它们添加连线"
+    },
+    "toast": {
+        "teamCreated": "团队创建成功",
+        "teamCreateFailed": "创建团队失败：{{error}}",
+        "teamUpdated": "团队更新成功",
+        "teamUpdateFailed": "更新团队失败：{{error}}",
+        "teamDeleted": "团队删除成功",
+        "teamDeleteFailed": "删除团队失败：{{error}}",
+        "enterTeamName": "请输入团队名称",
+        "workflowEditorNotImplemented": "工作流编辑器将会实现"
+    }
+}

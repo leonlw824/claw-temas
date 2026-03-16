@@ -1,0 +1,63 @@
+{
+    "title": "Agents",
+    "pageTitle": "従業員リスト",
+    "subtitle": "新しい Agent を追加すると、ClawTeams はメイン Agent のワークスペース初期ファイルと実行時認証設定をコピーします。これらの設定は対話形式で編集できます。",
+    "refresh": "更新",
+    "addAgent": "Agent を追加",
+    "gatewayWarning": "Gateway サービスが停止しています。Agent または Channel の変更が反映されるまで少し時間がかかる場合があります。",
+    "defaultBadge": "default",
+    "inherited": "継承",
+    "none": "なし",
+    "modelLine": "Model: {{model}}{{suffix}}",
+    "channelsLine": "Channels: {{channels}}",
+    "deleteAgent": "Agent を削除",
+    "settings": "設定",
+    "chatWithAgent": "チャット",
+    "creating": "作成中...",
+    "createDialog": {
+        "title": "Agent を追加",
+        "description": "名前だけで新しい Agent を作成できます。ClawTeams はメイン Agent のワークスペース初期ファイルと認証設定をコピーします。",
+        "nameLabel": "Agent 名",
+        "namePlaceholder": "Coding Helper"
+    },
+    "deleteDialog": {
+        "title": "Agent を削除",
+        "message": "ClawTeams から「{{name}}」を削除しますか？この操作により Agent と、その ClawTeams 管理下のワークスペース、実行時ファイル、セッションファイルがディスクから完全に削除されます。"
+    },
+    "settingsDialog": {
+        "title": "{{name}} Settings",
+        "description": "Agent 名を更新し、この Agent に属する Channel を管理します。",
+        "nameLabel": "Agent 名",
+        "agentIdLabel": "Agent ID",
+        "modelLabel": "Model",
+        "modelPlaceholder": "モデル名を選択または入力",
+        "avatarLabel": "アバター",
+        "avatarUpload": "アバターをアップロード",
+        "avatarDescription": "個人の写真をアバターとしてアップロード",
+        "soulLabel": "自己紹介",
+        "soulDescription": "自己紹介内容を編集（SOUL.md）",
+        "soulPlaceholder": "自己紹介を入力...",
+        "behaviorLabel": "行動準則",
+        "behaviorDescription": "行動準則内容を編集（AGENTS.md）",
+        "behaviorPlaceholder": "行動準則を入力...",
+        "channelsTitle": "Channels",
+        "channelsDescription": "各 Channel 種別は ClawTeams で 1 つだけ設定されます。ここで既存の Channel を保存すると、この Agent に所属が移動します。",
+        "addChannel": "Channel を追加",
+        "noChannels": "この Agent にはまだ Channel が割り当てられていません。"
+    },
+    "removeChannelDialog": {
+        "title": "Channel を削除",
+        "message": "{{name}} を削除しますか？現在の Channel 設定も削除されます。"
+    },
+    "toast": {
+        "agentCreated": "Agent を作成しました",
+        "agentCreateFailed": "Agent の作成に失敗しました: {{error}}",
+        "agentDeleted": "Agent を削除しました",
+        "agentUpdated": "Agent を更新しました",
+        "agentUpdateFailed": "Agent の更新に失敗しました: {{error}}",
+        "channelAssigned": "{{channel}} を Agent に割り当てました",
+        "channelAssignFailed": "Channel の割り当てに失敗しました: {{error}}",
+        "channelRemoved": "{{channel}} を削除しました",
+        "channelRemoveFailed": "Channel の削除に失敗しました: {{error}}"
+    }
+}

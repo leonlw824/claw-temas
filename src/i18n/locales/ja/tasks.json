@@ -1,0 +1,98 @@
+{
+    "title": "タスク",
+    "pageTitle": "タスク管理",
+    "subtitle": "チームワークフローに基づいてタスクを作成および管理します。",
+    "newTask": "新規タスク",
+    "refresh": "更新",
+    "noTasks": "タスクがありません",
+    "statistics": {
+        "total": "合計",
+        "waiting": "待機中",
+        "pending": "保留中",
+        "running": "実行中",
+        "completed": "完了",
+        "failed": "失敗",
+        "stopped": "停止"
+    },
+    "taskCard": {
+        "team": "チーム",
+        "type": "タイプ",
+        "workspace": "ワークスペース",
+        "status": "ステータス",
+        "createdAt": "作成日時",
+        "updatedAt": "更新日時",
+        "startedAt": "開始日時",
+        "completedAt": "完了日時",
+        "executionTime": "実行時間",
+        "start": "開始",
+        "stop": "停止",
+        "resume": "再開",
+        "reExecute": "再実行",
+        "viewResult": "結果を表示",
+        "viewLogs": "ログを表示",
+        "delete": "削除",
+        "openLocation": "場所を開く",
+        "openWorkspace": "ワークスペースフォルダを開く",
+        "currentNodes": "現在の作業ノード",
+        "clickToViewChat": "クリックしてチャットを表示"
+    },
+    "taskTypes": {
+        "file": "ファイル",
+        "app": "アプリ（内蔵）"
+    },
+    "createDialog": {
+        "title": "タスク作成",
+        "description": "チームワークフローに基づいて新しいタスクを作成します。",
+        "nameLabel": "タスク名",
+        "namePlaceholder": "タスク名を入力...",
+        "descriptionLabel": "タスク説明",
+        "descriptionPlaceholder": "タスク説明を入力...",
+        "typeLabel": "タスクタイプ",
+        "typePlaceholder": "タスクタイプを選択",
+        "teamLabel": "チームを選択",
+        "teamPlaceholder": "チームを選択してください",
+        "noTeams": "利用可能なチームがありません。まずチームを作成してください。"
+    },
+    "deleteDialog": {
+        "title": "タスク削除",
+        "message": "タスク \"{{name}}\" を削除してもよろしいですか？この操作は元に戻せません。"
+    },
+    "logsDialog": {
+        "title": "タスクログ：{{name}}",
+        "noLogs": "ログがありません"
+    },
+    "resultDialog": {
+        "title": "タスク結果：{{name}}",
+        "noResult": "結果がありません"
+    },
+    "reExecuteDialog": {
+        "title": "タスクを再実行",
+        "description": "タスク説明を変更して再実行します。"
+    },
+    "status": {
+        "waiting": "待機中",
+        "pending": "保留中",
+        "running": "実行中",
+        "completed": "完了",
+        "failed": "失敗",
+        "stopped": "停止"
+    },
+    "toast": {
+        "taskCreated": "タスクが作成されました",
+        "taskCreateFailed": "タスクの作成に失敗しました：{{error}}",
+        "taskDeleted": "タスクが削除されました",
+        "taskDeleteFailed": "タスクの削除に失敗しました：{{error}}",
+        "taskStarted": "タスクが開始されました",
+        "taskStartFailed": "タスクの開始に失敗しました：{{error}}",
+        "taskStopped": "タスクが停止されました",
+        "taskStopFailed": "タスクの停止に失敗しました：{{error}}",
+        "taskResumed": "タスクが再開されました",
+        "taskResumeFailed": "タスクの再開に失敗しました：{{error}}",
+        "taskReExecuted": "タスクが再作成され、実行が開始されました",
+        "taskReExecuteFailed": "タスクの再実行に失敗しました：{{error}}",
+        "fillAllFields": "すべてのフィールドを入力してください",
+        "selectType": "タスクタイプを選択してください",
+        "noWorkspacePath": "このタスクにはワークスペースパスがありません",
+        "openWorkspaceFailed": "ワークスペースを開けませんでした：{{error}}"
+    }
+}

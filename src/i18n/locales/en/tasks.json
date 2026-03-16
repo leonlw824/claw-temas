@@ -1,0 +1,98 @@
+{
+    "title": "Tasks",
+    "pageTitle": "Task Management",
+    "subtitle": "Create and manage tasks based on team workflows.",
+    "newTask": "New Task",
+    "refresh": "Refresh",
+    "noTasks": "No tasks yet",
+    "statistics": {
+        "total": "Total",
+        "waiting": "Waiting",
+        "pending": "Pending",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "stopped": "Stopped"
+    },
+    "taskCard": {
+        "team": "Team",
+        "type": "Type",
+        "workspace": "Workspace",
+        "status": "Status",
+        "createdAt": "Created",
+        "updatedAt": "Updated",
+        "startedAt": "Started",
+        "completedAt": "Completed",
+        "executionTime": "Execution Time",
+        "start": "Start",
+        "stop": "Stop",
+        "resume": "Resume",
+        "reExecute": "Re-execute",
+        "viewResult": "View Result",
+        "viewLogs": "View Logs",
+        "delete": "Delete",
+        "openLocation": "Open Location",
+        "openWorkspace": "Open workspace folder",
+        "currentNodes": "Current Nodes",
+        "clickToViewChat": "Click to view chat"
+    },
+    "taskTypes": {
+        "file": "File",
+        "app": "App (Built-in)"
+    },
+    "createDialog": {
+        "title": "Create Task",
+        "description": "Create a new task based on a team workflow.",
+        "nameLabel": "Task Name",
+        "namePlaceholder": "Enter task name...",
+        "descriptionLabel": "Task Description",
+        "descriptionPlaceholder": "Enter task description...",
+        "typeLabel": "Task Type",
+        "typePlaceholder": "Select task type",
+        "teamLabel": "Select Team",
+        "teamPlaceholder": "Select a team",
+        "noTeams": "No teams available. Please create a team first."
+    },
+    "deleteDialog": {
+        "title": "Delete Task",
+        "message": "Are you sure you want to delete task \"{{name}}\"? This action cannot be undone."
+    },
+    "logsDialog": {
+        "title": "Task Logs: {{name}}",
+        "noLogs": "No logs available"
+    },
+    "resultDialog": {
+        "title": "Task Result: {{name}}",
+        "noResult": "No result available"
+    },
+    "reExecuteDialog": {
+        "title": "Re-execute Task",
+        "description": "Modify task description and execute again."
+    },
+    "status": {
+        "waiting": "Waiting",
+        "pending": "Pending",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "stopped": "Stopped"
+    },
+    "toast": {
+        "taskCreated": "Task created successfully",
+        "taskCreateFailed": "Failed to create task: {{error}}",
+        "taskDeleted": "Task deleted successfully",
+        "taskDeleteFailed": "Failed to delete task: {{error}}",
+        "taskStarted": "Task started",
+        "taskStartFailed": "Failed to start task: {{error}}",
+        "taskStopped": "Task stopped",
+        "taskStopFailed": "Failed to stop task: {{error}}",
+        "taskResumed": "Task resumed",
+        "taskResumeFailed": "Failed to resume task: {{error}}",
+        "taskReExecuted": "Task re-created and started executing",
+        "taskReExecuteFailed": "Failed to re-execute task: {{error}}",
+        "fillAllFields": "Please fill in all fields",
+        "selectType": "Please select a task type",
+        "noWorkspacePath": "This task has no workspace path",
+        "openWorkspaceFailed": "Failed to open workspace: {{error}}"
+    }
+}
