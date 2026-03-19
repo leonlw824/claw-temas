@@ -105,6 +105,26 @@ export async function handleTaskRoutes(
       return true;
     }
 
+    // Update task description
+    if (parts.length === 1 && req.method === 'PATCH') {
+      try {
+        const taskId = decodeURIComponent(parts[0]);
+        const body = await parseJsonBody<{ description: string }>(req);
+
+        if (!body.description || typeof body.description !== 'string') {
+          sendJson(res, 400, { success: false, error: 'Task description is required' });
+          return true;
+        }
+
+        const snapshot = await taskConfig.updateTaskDescription(taskId, body.description);
+        sendJson(res, 200, { success: true, ...snapshot });
+      } catch (error) {
+        console.error('Failed to update task:', error);
+        sendJson(res, 500, { success: false, error: String(error) });
+      }
+      return true;
+    }
+
     // Get task logs
     if (parts.length === 2 && parts[1] === 'logs' && req.method === 'GET') {
       try {

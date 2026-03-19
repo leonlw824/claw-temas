@@ -16,6 +16,7 @@ interface TasksState {
   fetchTasks: () => Promise<void>;
   fetchStatistics: () => Promise<void>;
   createTask: (data: CreateTaskData) => Promise<void>;
+  updateTaskDescription: (taskId: string, description: string) => Promise<void>;
   deleteTask: (taskId: string) => Promise<void>;
   getTaskLogs: (taskId: string) => Promise<string[]>;
   executeTask: (taskId: string) => Promise<void>;
@@ -70,6 +71,26 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       } else {
         set({ loading: false, error: 'Failed to create task' });
         throw new Error('Failed to create task');
+      }
+    } catch (error) {
+      set({ loading: false, error: String(error) });
+      throw error;
+    }
+  },
+
+  updateTaskDescription: async (taskId: string, description: string) => {
+    set({ loading: true, error: null });
+    try {
+      const result = await hostApiFetch<{ success: boolean; tasks: Task[] }>(`/api/tasks/${encodeURIComponent(taskId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description }),
+      });
+      if (result.success) {
+        set({ tasks: result.tasks, loading: false });
+      } else {
+        set({ loading: false, error: 'Failed to update task description' });
+        throw new Error('Failed to update task description');
       }
     } catch (error) {
       set({ loading: false, error: String(error) });

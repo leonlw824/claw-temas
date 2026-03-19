@@ -408,3 +408,22 @@ export async function incrementTaskVersion(taskId: string): Promise<void> {
   await writeTaskFile(task);
   logger.info('Task version incremented', { taskId, version: task.version });
 }
+
+export async function updateTaskDescription(
+  taskId: string,
+  description: string
+): Promise<TasksListSnapshot> {
+  const task = await readTaskFile(taskId);
+
+  if (!task) {
+    throw new Error(`Task "${taskId}" not found`);
+  }
+
+  task.description = description;
+  task.updatedAt = new Date().toISOString();
+
+  await writeTaskFile(task);
+  logger.info('Task description updated', { taskId, description: description.substring(0, 50) });
+
+  return listTasksSnapshot();
+}

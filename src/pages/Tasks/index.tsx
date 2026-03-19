@@ -286,6 +286,7 @@ export function Tasks() {
   const fetchTasks = useTasksStore(s => s.fetchTasks);
   const fetchStatistics = useTasksStore(s => s.fetchStatistics);
   const createTask = useTasksStore(s => s.createTask);
+  const updateTaskDescription = useTasksStore(s => s.updateTaskDescription);
   const deleteTask = useTasksStore(s => s.deleteTask);
   const getTaskLogs = useTasksStore(s => s.getTaskLogs);
   const executeTask = useTasksStore(s => s.executeTask);
@@ -440,28 +441,16 @@ export function Tasks() {
     }
 
     try {
-      // Create a new task with the same properties but updated description
-      await createTask({
-        name: reExecuteTask.name,
-        description: reExecuteDescription,
-        teamId: reExecuteTask.teamId,
-        type: reExecuteTask.type,
-      });
+      // Update the task description instead of creating a new task
+      await updateTaskDescription(reExecuteTask.id, reExecuteDescription);
 
       setReExecuteDialogOpen(false);
       setReExecuteTask(null);
       setReExecuteDescription('');
       toast.success(t('toast.taskReExecuted'));
 
-      // Auto-execute the newly created task
-      // Wait a bit for the task list to update
-      setTimeout(async () => {
-        await fetchTasks();
-        const latestTask = tasks[0]; // Assuming the newest task is first
-        if (latestTask) {
-          await executeTask(latestTask.id);
-        }
-      }, 500);
+      // Auto-execute the updated task
+      await executeTask(reExecuteTask.id);
     } catch (error) {
       toast.error(t('toast.taskReExecuteFailed', { error: String(error) }));
     }

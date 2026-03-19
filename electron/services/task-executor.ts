@@ -197,7 +197,9 @@ class TaskMessageBuilder {
     task: TaskContext,
     currentNodeId: string,
     nextNodeIds: string[],
-    graph: ExecutionGraph
+    graph: ExecutionGraph,
+    hasRollback: boolean,
+    rollbackFeedback?: string
   ): string {
     const currentNode = graph.getNode(currentNodeId);
     const nextNodes = nextNodeIds.map(id => graph.getNode(id)).filter(Boolean);
@@ -206,6 +208,15 @@ class TaskMessageBuilder {
       ? nextNodes.map(n => n?.agentId).join(', ')
       : 'END';
 
+    // If this node has rollback feedback, emphasize the need for revision
+    const revisionInstruction = rollbackFeedback
+      ? `\n\n## IMPORTANT - Revision Required\n\nYou are being re-executed because a subsequent team member reviewed your work and requested revisions.\n\n## Review Feedback\n${rollbackFeedback}`
+      : '';
+
+    const rollbackInstruction = hasRollback
+      ? '\n\n**Important**: Rollback is enabled on this connection. After reviewing the previous result, if you determine that the previous agent needs to redo their work, include "rollback: true" in your output.".'
+      : '';
+
     return `# Task Information
 Task Name: ${task.name}
 Task ID: ${task.id}
@@ -213,7 +224,7 @@ Working Directory: ${task.workspacePath}
 Description: ${task.description}
 
 Current Node: ${currentNode?.agentId || currentNodeId}
-Next Node(s): ${nextNodesText}
+Next Node(s): ${nextNodesText}${revisionInstruction}${rollbackInstruction}
 
 As a team member, complete your designated work according to your position in the workflow.`;
   }
@@ -1072,12 +1083,17 @@ ${currentNodeResult.rollbackFeedback}
 
 Please carefully review the feedback above and revise your work accordingly. As a team member, complete your designated work according to your position in the workflow.`;
         } else if (predecessors.length === 0) {
-          // First node (normal execution, no rollback feedback)
+          // First node (normal execution or with rollback feedback)
+          // Check if any outgoing edges have rollback enabled
+          const hasRollback = successorIds.some(successorId => graph.hasRollback(node.id, successorId));
+          const rollbackFeedback = currentNodeResult?.rollbackFeedback;
           message = this.messageBuilder.buildFirstNodeMessage(
             taskContext,
             node.id,
             successorIds,
-            graph
+            graph,
+            hasRollback,
+            rollbackFeedback
           );
         } else {
           // Subsequent node (normal execution, no rollback feedback)

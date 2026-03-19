@@ -21,6 +21,73 @@ import type { Team, TeamWorkflow, TeamNode, TeamEdge } from '@/types/team';
 import { END_NODE_ID, END_AGENT_ID } from '@/types/team';
 import { useNavigate } from 'react-router-dom';
 
+/**
+ * Get nodes in topological order based on edges
+ * For simple linear workflow visualization in team card
+ */
+function getTopologicalOrder(nodes: TeamNode[], edges: TeamEdge[]): TeamNode[] {
+  if (nodes.length === 0) return [];
+
+  // Find start node (node with no incoming edges, excluding END node)
+  const incomingEdges = new Map<string, string[]>();
+  const outgoingEdges = new Map<string, string[]>();
+
+  // Initialize
+  nodes.forEach(node => {
+    incomingEdges.set(node.id, []);
+    outgoingEdges.set(node.id, []);
+  });
+
+  // Build edge maps
+  edges.forEach(edge => {
+    const incoming = incomingEdges.get(edge.target) || [];
+    incoming.push(edge.source);
+    incomingEdges.set(edge.target, incoming);
+
+    const outgoing = outgoingEdges.get(edge.source) || [];
+    outgoing.push(edge.target);
+    outgoingEdges.set(edge.source, outgoing);
+  });
+
+  // Find start nodes (no incoming edges)
+  const startNodes = nodes.filter(node => {
+    const incoming = incomingEdges.get(node.id) || [];
+    return incoming.length === 0;
+  });
+
+  // BFS traversal
+  const visited = new Set<string>();
+  const result: TeamNode[] = [];
+  const queue = [...startNodes];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (visited.has(current.id)) continue;
+
+    visited.add(current.id);
+    result.push(current);
+
+    const outgoing = outgoingEdges.get(current.id) || [];
+    for (const nextId of outgoing) {
+      if (!visited.has(nextId)) {
+        const nextNode = nodes.find(n => n.id === nextId);
+        if (nextNode) {
+          queue.push(nextNode);
+        }
+      }
+    }
+  }
+
+  // Add any remaining unvisited nodes (shouldn't happen in valid workflow)
+  nodes.forEach(node => {
+    if (!visited.has(node.id)) {
+      result.push(node);
+    }
+  });
+
+  return result;
+}
+
 // Workflow Editor Component
 function WorkflowEditor({ workflow, agents, onSave, onCancel }: {
   workflow: TeamWorkflow;
@@ -635,14 +702,11 @@ function WorkflowEditor({ workflow, agents, onSave, onCancel }: {
               />
             </div>
             {(() => {
-              // Check if source node is an initial node (has no incoming edges)
               const currentEdge = edges.find(e => e.id === selectedEdge);
               if (!currentEdge) return null;
 
-              const sourceHasIncoming = edges.some(e => e.target === currentEdge.source);
-
-              // Only show rollback option if source node has incoming edges
-              if (!sourceHasIncoming) return null;
+              // Don't show rollback option if target is END node
+              if (currentEdge.target === END_NODE_ID) return null;
 
               return (
                 <div className="flex items-center space-x-2">
@@ -693,7 +757,7 @@ function TeamCard({ team, agents, onEdit, onRename, onDelete, onCreateTask }: {
 
   // 渲染缩略流程图
   const renderMiniWorkflow = () => {
-    const nodes = team.workflow.nodes;
+    const { nodes, edges } = team.workflow;
 
     if (nodes.length === 0) {
       return (
@@ -703,26 +767,36 @@ function TeamCard({ team, agents, onEdit, onRename, onDelete, onCreateTask }: {
       );
     }
 
+    // Sort nodes by workflow execution order (topological sort)
+    const sortedNodes = getTopologicalOrder(nodes, edges);
+
     // 简单的缩略图布局
     return (
       <div className="h-24 flex items-center justify-center gap-2 overflow-hidden">
-        {nodes.slice(0, 5).map((node, idx) => (
+        {sortedNodes.slice(0, 5).map((node, idx) => (
           <div key={node.id} className="flex items-center">
             <div className="flex flex-col items-center">
-              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                <User className="h-4 w-4 text-primary" />
+              <div className={cn(
+                "w-8 h-8 rounded-full flex items-center justify-center",
+                node.id === END_NODE_ID ? "bg-green-500/20" : "bg-primary/10"
+              )}>
+                {node.id === END_NODE_ID ? (
+                  <span className="text-[8px] font-bold text-green-600">END</span>
+                ) : (
+                  <User className="h-4 w-4 text-primary" />
+                )}
               </div>
               <span className="text-[9px] mt-1 truncate max-w-[40px]">
                 {agentNamesMap[node.agentId] || node.agentId}
               </span>
             </div>
-            {idx < Math.min(nodes.length - 1, 4) && (
+            {idx < Math.min(sortedNodes.length - 1, 4) && (
               <ArrowRight className="h-3 w-3 text-muted-foreground mx-1" />
             )}
           </div>
         ))}
-        {nodes.length > 5 && (
-          <span className="text-xs text-muted-foreground">+{nodes.length - 5}</span>
+        {sortedNodes.length > 5 && (
+          <span className="text-xs text-muted-foreground">+{sortedNodes.length - 5}</span>
         )}
       </div>
     );
@@ -738,7 +812,7 @@ function TeamCard({ team, agents, onEdit, onRename, onDelete, onCreateTask }: {
             <div className="text-xs text-muted-foreground">
               <div className="flex items-center gap-2 mb-1">
                 <span className="font-medium">{t('teamCard.members')}:</span>
-                <span className="truncate">{team.workflow.nodes.length}</span>
+                <span className="truncate">{team.workflow.nodes.filter(n => n.id !== END_NODE_ID).length}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="font-medium">{t('teamCard.createdAt')}:</span>
