@@ -2,13 +2,15 @@
   "title": "设置",
   "subtitle": "配置您的 ClawTeams 体验",
   "appearance": {
-    "title": "外观",
+    "title": "通用",
     "description": "自定义外观和风格",
     "theme": "主题",
     "light": "浅色",
     "dark": "深色",
     "system": "跟随系统",
-    "language": "语言"
+    "language": "语言",
+    "launchAtStartup": "开机自动启动",
+    "launchAtStartupDesc": "登录系统后自动启动 ClawTeams"
   },
   "aiProviders": {
     "title": "AI 模型提供商",
@@ -61,6 +63,7 @@
       "change": "更换提供商",
       "add": "添加提供商",
       "save": "保存",
+      "customDoc": "查看文档",
       "validate": "验证"
     },
     "card": {
@@ -76,6 +79,8 @@
     },
     "protocols": {
       "openai": "OpenAI 兼容",
+      "openaiCompletions": "OpenAI Completions",
+      "openaiResponses": "OpenAI Responses",
       "anthropic": "Anthropic 兼容"
     },
     "toast": {
@@ -194,7 +199,9 @@
       }
     },
     "devMode": "开发者模式",
-    "devModeDesc": "显示开发者工具和快捷方式"
+    "devModeDesc": "显示开发者工具和快捷方式",
+    "telemetry": "匿名使用数据",
+    "telemetryDesc": "允许提供匿名的基础使用数据，用于改进 ClawTeams"
   },
   "developer": {
     "title": "开发者",
@@ -212,6 +219,29 @@
     "cliPowershell": "PowerShell 命令。",
     "cmdUnavailable": "命令不可用",
     "cmdCopied": "CLI 命令已复制",
+    "doctor": "OpenClaw Doctor 诊断",
+    "doctorDesc": "运行 `openclaw doctor` 并查看原始诊断输出。",
+    "runDoctor": "运行 Doctor",
+    "runDoctorFix": "运行 Doctor 并修复",
+    "doctorSucceeded": "OpenClaw doctor 已完成",
+    "doctorFailed": "OpenClaw doctor 检测到问题",
+    "doctorRunFailed": "运行 OpenClaw doctor 失败",
+    "doctorFixSucceeded": "OpenClaw doctor 修复已完成",
+    "doctorFixFailed": "OpenClaw doctor 修复后仍有问题",
+    "doctorFixRunFailed": "运行 OpenClaw doctor 修复失败",
+    "doctorCopied": "诊断输出已复制",
+    "doctorOk": "正常",
+    "doctorIssue": "发现问题",
+    "doctorFixOk": "已修复",
+    "doctorFixIssue": "修复失败",
+    "doctorExitCode": "退出码",
+    "doctorDuration": "耗时",
+    "doctorCommand": "命令",
+    "doctorWorkingDir": "工作目录",
+    "doctorError": "错误",
+    "doctorStdout": "标准输出",
+    "doctorStderr": "标准错误",
+    "doctorOutputEmpty": "（空）",
     "wsDiagnostic": "WS 诊断模式",
     "wsDiagnosticDesc": "临时启用 WS/HTTP 回退链，用于网关 RPC 调试。",
     "wsDiagnosticEnabled": "已启用 WS 诊断模式",
@@ -238,6 +268,7 @@
     "basedOn": "基于 OpenClaw",
     "version": "版本 {{version}}",
     "docs": "官网",
-    "github": "GitHub"
+    "github": "GitHub",
+    "faq": "常见问题"
   }
 }

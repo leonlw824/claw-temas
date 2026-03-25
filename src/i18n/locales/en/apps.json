@@ -1,0 +1,19 @@
+{
+  "pageTitle": "Applications",
+  "subtitle": "Manage your installed applications",
+  "refresh": "Refresh",
+  "noApps": "No applications installed",
+  "internal": "Internal",
+  "external": "External",
+  "noDescription": "No description available",
+  "enable": "Enable",
+  "disable": "Disable",
+  "confirmUninstall": "Are you sure you want to uninstall this application?",
+  "toast": {
+    "appEnabled": "Application enabled",
+    "appDisabled": "Application disabled",
+    "appUninstalled": "Application uninstalled",
+    "toggleFailed": "Failed to toggle application: {{error}}",
+    "uninstallFailed": "Failed to uninstall application: {{error}}"
+  }
+}

@@ -8,6 +8,7 @@
         "agents": "Employees",
         "teams": "Teams",
         "tasks": "Tasks",
+        "apps": "Applications",
         "channels": "Channels",
         "dashboard": "Dashboard",
         "settings": "Settings",

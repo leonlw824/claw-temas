@@ -4,6 +4,8 @@
  */
 
 import { randomBytes } from 'crypto';
+import { app } from 'electron';
+import { resolveSupportedLanguage } from '../../shared/language';
 
 // Lazy-load electron-store (ESM module)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,7 +27,10 @@ export interface AppSettings {
   language: string;
   startMinimized: boolean;
   launchAtStartup: boolean;
-  
+  telemetryEnabled: boolean;
+  machineId: string;
+  hasReportedInstall: boolean;
+
   // Gateway
   gatewayAutoStart: boolean;
   gatewayPort: number;
@@ -36,17 +41,17 @@ export interface AppSettings {
   proxyHttpsServer: string;
   proxyAllServer: string;
   proxyBypassRules: string;
-  
+
   // Update
   updateChannel: 'stable' | 'beta' | 'dev';
   autoCheckUpdate: boolean;
   autoDownloadUpdate: boolean;
   skippedVersions: string[];
-  
+
   // UI State
   sidebarCollapsed: boolean;
   devModeUnlocked: boolean;
-  
+
   // Presets
   selectedBundles: string[];
   enabledSkills: string[];
@@ -56,39 +61,54 @@ export interface AppSettings {
 /**
  * Default settings
  */
-const defaults: AppSettings = {
-  // General
-  theme: 'system',
-  language: 'en',
-  startMinimized: false,
-  launchAtStartup: false,
-  
-  // Gateway
-  gatewayAutoStart: true,
-  gatewayPort: 18789,
-  gatewayToken: generateToken(),
-  proxyEnabled: false,
-  proxyServer: '',
-  proxyHttpServer: '',
-  proxyHttpsServer: '',
-  proxyAllServer: '',
-  proxyBypassRules: '<local>;localhost;127.0.0.1;::1',
-  
-  // Update
-  updateChannel: 'stable',
-  autoCheckUpdate: true,
-  autoDownloadUpdate: false,
-  skippedVersions: [],
-  
-  // UI State
-  sidebarCollapsed: false,
-  devModeUnlocked: false,
-  
-  // Presets
-  selectedBundles: ['productivity', 'developer'],
-  enabledSkills: [],
-  disabledSkills: [],
-};
+function getSystemLocale(): string {
+  const preferredLanguages = typeof app.getPreferredSystemLanguages === 'function'
+    ? app.getPreferredSystemLanguages()
+    : [];
+  return preferredLanguages[0]
+    || (typeof app.getLocale === 'function' ? app.getLocale() : '')
+    || Intl.DateTimeFormat().resolvedOptions().locale
+    || 'en';
+}
+
+function createDefaultSettings(): AppSettings {
+  return {
+    // General
+    theme: 'system',
+    language: resolveSupportedLanguage(getSystemLocale()),
+    startMinimized: false,
+    launchAtStartup: false,
+    telemetryEnabled: true,
+    machineId: '',
+    hasReportedInstall: false,
+
+    // Gateway
+    gatewayAutoStart: true,
+    gatewayPort: 18789,
+    gatewayToken: generateToken(),
+    proxyEnabled: false,
+    proxyServer: '',
+    proxyHttpServer: '',
+    proxyHttpsServer: '',
+    proxyAllServer: '',
+    proxyBypassRules: '<local>;localhost;127.0.0.1;::1',
+
+    // Update
+    updateChannel: 'stable',
+    autoCheckUpdate: true,
+    autoDownloadUpdate: false,
+    skippedVersions: [],
+
+    // UI State
+    sidebarCollapsed: false,
+    devModeUnlocked: false,
+
+    // Presets
+    selectedBundles: ['productivity', 'developer'],
+    enabledSkills: [],
+    disabledSkills: [],
+  };
+}
 
 /**
  * Get the settings store instance (lazy initialization)
@@ -98,7 +118,7 @@ async function getSettingsStore() {
     const Store = (await import('electron-store')).default;
     settingsStoreInstance = new Store<AppSettings>({
       name: 'settings',
-      defaults,
+      defaults: createDefaultSettings(),
     });
   }
   return settingsStoreInstance;

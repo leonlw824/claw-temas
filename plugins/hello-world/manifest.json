@@ -1,0 +1,10 @@
+{
+  "id": "hello-world",
+  "name": "Hello World",
+  "version": "1.0.0",
+  "description": "A simple hello world extension app",
+  "author": "ClawX Team",
+  "icon": "👋",
+  "type": "component",
+  "entry": "index.js"
+}

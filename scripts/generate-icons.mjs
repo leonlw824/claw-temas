@@ -1,9 +1,10 @@
 #!/usr/bin/env zx
 
-import 'zx/globals';
+import { $, echo, fs } from 'zx';
+import path from 'node:path';
 import sharp from 'sharp';
 import png2icons from 'png2icons';
-import { fileURLToPath } from 'url';
+import { fileURLToPath } from 'node:url';
 
 // Calculate paths
 const __filename = fileURLToPath(import.meta.url);

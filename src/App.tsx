@@ -17,6 +17,8 @@ import { Tasks } from './pages/Tasks';
 import { Channels } from './pages/Channels';
 import { Skills } from './pages/Skills';
 import { Cron } from './pages/Cron';
+import { Apps } from './pages/Apps';
+import { AppViewer } from './pages/Apps/AppViewer';
 import { Settings } from './pages/Settings';
 import { Setup } from './pages/Setup';
 import { useSettingsStore } from './stores/settings';
@@ -173,6 +175,8 @@ function App() {
             <Route path="/tasks" element={<Tasks />} />
             <Route path="/channels" element={<Channels />} />
             <Route path="/skills" element={<Skills />} />
+            <Route path="/apps" element={<Apps />} />
+            <Route path="/apps/:appId" element={<AppViewer />} />
             <Route path="/cron" element={<Cron />} />
             <Route path="/settings/*" element={<Settings />} />
           </Route>

@@ -4,8 +4,13 @@
  */
 import { create } from 'zustand';
 import { hostApiFetch } from '@/lib/host-api';
+import {
+  isChannelRuntimeConnected,
+  pickChannelRuntimeStatus,
+  type ChannelRuntimeAccountSnapshot,
+} from '@/lib/channel-status';
 import { useGatewayStore } from './gateway';
-import type { Channel, ChannelType } from '../types/channel';
+import { CHANNEL_NAMES, type Channel, type ChannelType } from '../types/channel';
 
 interface AddChannelParams {
   type: ChannelType;
@@ -28,7 +33,12 @@ interface ChannelsState {
   setChannels: (channels: Channel[]) => void;
   updateChannel: (channelId: string, updates: Partial<Channel>) => void;
   clearError: () => void;
+  scheduleAutoReconnect: (channelId: string) => void;
+  clearAutoReconnect: (channelId: string) => void;
 }
+
+const reconnectTimers = new Map<string, NodeJS.Timeout>();
+const reconnectAttempts = new Map<string, number>();
 
 export const useChannelsStore = create<ChannelsState>((set, get) => ({
   channels: [],
@@ -52,6 +62,10 @@ export const useChannelsStore = create<ChannelsState>((set, get) => ({
             lastConnectedAt?: number | null;
             lastInboundAt?: number | null;
             lastOutboundAt?: number | null;
+            lastProbeAt?: number | null;
+            probe?: {
+              ok?: boolean;
+            } | null;
           }>>;
           channelDefaultAccountId?: Record<string, string>;
       }>('channels.status', { probe: true });
@@ -72,44 +86,24 @@ export const useChannelsStore = create<ChannelsState>((set, get) => ({
 
           const accounts = data.channelAccounts?.[channelId] || [];
           const defaultAccountId = data.channelDefaultAccountId?.[channelId];
+          const summarySignal = summary as { error?: string; lastError?: string } | undefined;
           const primaryAccount =
             (defaultAccountId ? accounts.find((a) => a.accountId === defaultAccountId) : undefined) ||
-            accounts.find((a) => a.connected === true || a.linked === true) ||
+            accounts.find((a) => isChannelRuntimeConnected(a as ChannelRuntimeAccountSnapshot)) ||
             accounts[0];
 
-          // Map gateway status to our status format
-          let status: Channel['status'] = 'disconnected';
-          const now = Date.now();
-          const RECENT_MS = 10 * 60 * 1000;
-          const hasRecentActivity = (a: { lastInboundAt?: number | null; lastOutboundAt?: number | null; lastConnectedAt?: number | null }) =>
-            (typeof a.lastInboundAt === 'number' && now - a.lastInboundAt < RECENT_MS) ||
-            (typeof a.lastOutboundAt === 'number' && now - a.lastOutboundAt < RECENT_MS) ||
-            (typeof a.lastConnectedAt === 'number' && now - a.lastConnectedAt < RECENT_MS);
-          const anyConnected = accounts.some((a) => a.connected === true || a.linked === true || hasRecentActivity(a));
-          const anyRunning = accounts.some((a) => a.running === true);
+          const status: Channel['status'] = pickChannelRuntimeStatus(accounts, summarySignal);
           const summaryError =
-            typeof (summary as { error?: string })?.error === 'string'
-              ? (summary as { error?: string }).error
-              : typeof (summary as { lastError?: string })?.lastError === 'string'
-                ? (summary as { lastError?: string }).lastError
+            typeof summarySignal?.error === 'string'
+              ? summarySignal.error
+              : typeof summarySignal?.lastError === 'string'
+                ? summarySignal.lastError
                 : undefined;
-          const anyError =
-            accounts.some((a) => typeof a.lastError === 'string' && a.lastError) || Boolean(summaryError);
-
-          if (anyConnected) {
-            status = 'connected';
-          } else if (anyRunning && !anyError) {
-            status = 'connected';
-          } else if (anyError) {
-            status = 'error';
-          } else if (anyRunning) {
-            status = 'connecting';
-          }
 
           channels.push({
             id: `${channelId}-${primaryAccount?.accountId || 'default'}`,
             type: channelId as ChannelType,
-            name: primaryAccount?.name || channelId,
+            name: primaryAccount?.name || CHANNEL_NAMES[channelId as ChannelType] || channelId,
             status,
             accountId: primaryAccount?.accountId,
             error:
@@ -205,7 +199,8 @@ export const useChannelsStore = create<ChannelsState>((set, get) => ({
   },
 
   disconnectChannel: async (channelId) => {
-    const { updateChannel } = get();
+    const { updateChannel, clearAutoReconnect } = get();
+    clearAutoReconnect(channelId);
 
     try {
       await useGatewayStore.getState().rpc('channels.disconnect', { channelId });
@@ -234,4 +229,37 @@ export const useChannelsStore = create<ChannelsState>((set, get) => ({
   },
 
   clearError: () => set({ error: null }),
+
+  scheduleAutoReconnect: (channelId) => {
+    if (reconnectTimers.has(channelId)) return;
+    
+    const attempts = reconnectAttempts.get(channelId) || 0;
+    // Exponential backoff capped at 2 minutes
+    const delay = Math.min(5000 * Math.pow(2, attempts), 120000);
+    
+    console.log(`[Watchdog] Scheduling auto-reconnect for ${channelId} in ${delay}ms (attempt ${attempts + 1})`);
+    
+    const timer = setTimeout(() => {
+      reconnectTimers.delete(channelId);
+      const state = get();
+      const channel = state.channels.find((c) => c.id === channelId);
+      
+      if (channel && (channel.status === 'disconnected' || channel.status === 'error')) {
+        reconnectAttempts.set(channelId, attempts + 1);
+        console.log(`[Watchdog] Executing auto-reconnect for ${channelId} (attempt ${attempts + 1})`);
+        state.connectChannel(channelId).catch(() => {});
+      }
+    }, delay);
+    
+    reconnectTimers.set(channelId, timer);
+  },
+
+  clearAutoReconnect: (channelId) => {
+    const timer = reconnectTimers.get(channelId);
+    if (timer) {
+      clearTimeout(timer);
+      reconnectTimers.delete(channelId);
+    }
+    reconnectAttempts.delete(channelId);
+  },
 }));

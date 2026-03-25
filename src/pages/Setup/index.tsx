@@ -97,6 +97,7 @@ import {
   type ProviderAccount,
   type ProviderType,
   type ProviderTypeInfo,
+  getProviderDocsUrl,
   getProviderIconUrl,
   resolveProviderApiKeyForSave,
   resolveProviderModelForSave,
@@ -113,6 +114,15 @@ import clawxIcon from '@/assets/logo.svg';
 
 // Use the shared provider registry for setup providers
 const providers = SETUP_PROVIDERS;
+
+function getProtocolBaseUrlPlaceholder(
+  apiProtocol: ProviderAccount['apiProtocol'],
+): string {
+  if (apiProtocol === 'anthropic-messages') {
+    return 'https://api.example.com/anthropic';
+  }
+  return 'https://api.example.com/v1';
+}
 
 // NOTE: Channel types moved to Settings > Channels page
 // NOTE: Skill bundles moved to Settings > Skills page - auto-install essential skills during setup
@@ -704,7 +714,7 @@ function ProviderContent({
   onApiKeyChange,
   onConfiguredChange,
 }: ProviderContentProps) {
-  const { t } = useTranslation(['setup', 'settings']);
+  const { t, i18n } = useTranslation(['setup', 'settings']);
   const devModeUnlocked = useSettingsStore((state) => state.devModeUnlocked);
   const [showKey, setShowKey] = useState(false);
   const [validating, setValidating] = useState(false);
@@ -712,6 +722,7 @@ function ProviderContent({
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [baseUrl, setBaseUrl] = useState('');
   const [modelId, setModelId] = useState('');
+  const [apiProtocol, setApiProtocol] = useState<ProviderAccount['apiProtocol']>('openai-completions');
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
   const providerMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -905,6 +916,7 @@ function ProviderContent({
     let cancelled = false;
     (async () => {
       if (!selectedProvider) return;
+      setApiProtocol('openai-completions');
       try {
         const snapshot = await fetchProviderSnapshot();
         const statusMap = new Map(snapshot.statuses.map((status) => [status.id, status]));
@@ -917,7 +929,7 @@ function ProviderContent({
         const accountIdForLoad = preferredAccount?.id || selectedProvider;
         setSelectedAccountId(preferredAccount?.id || null);
 
-        const savedProvider = await hostApiFetch<{ baseUrl?: string; model?: string } | null>(
+        const savedProvider = await hostApiFetch<{ baseUrl?: string; model?: string; apiProtocol?: ProviderAccount['apiProtocol'] } | null>(
           `/api/providers/${encodeURIComponent(accountIdForLoad)}`,
         );
         const storedKey = (await hostApiFetch<{ apiKey: string | null }>(
@@ -929,6 +941,7 @@ function ProviderContent({
           const info = providers.find((p) => p.id === selectedProvider);
           setBaseUrl(savedProvider?.baseUrl || info?.defaultBaseUrl || '');
           setModelId(savedProvider?.model || info?.defaultModelId || '');
+          setApiProtocol(savedProvider?.apiProtocol || 'openai-completions');
         }
       } catch (error) {
         if (!cancelled) {
@@ -963,6 +976,7 @@ function ProviderContent({
   }, [providerMenuOpen]);
 
   const selectedProviderData = providers.find((p) => p.id === selectedProvider);
+  const providerDocsUrl = getProviderDocsUrl(selectedProviderData, i18n.language);
   const selectedProviderIconUrl = selectedProviderData
     ? getProviderIconUrl(selectedProviderData.id)
     : undefined;
@@ -1002,7 +1016,12 @@ function ProviderContent({
           'provider:validateKey',
           selectedAccountId || selectedProvider,
           apiKey,
-          { baseUrl: baseUrl.trim() || undefined }
+          {
+            baseUrl: baseUrl.trim() || undefined,
+            apiProtocol: (selectedProvider === 'custom' || selectedProvider === 'ollama')
+              ? apiProtocol
+              : undefined,
+          }
         ) as { valid: boolean; error?: string };
 
         setKeyValid(result.valid);
@@ -1039,6 +1058,9 @@ function ProviderContent({
           ? 'local'
           : 'api_key',
         baseUrl: baseUrl.trim() || undefined,
+        apiProtocol: (selectedProvider === 'custom' || selectedProvider === 'ollama')
+          ? apiProtocol
+          : undefined,
         model: effectiveModelId,
         enabled: true,
         isDefault: false,
@@ -1056,6 +1078,7 @@ function ProviderContent({
                 label: accountPayload.label,
                 authMode: accountPayload.authMode,
                 baseUrl: accountPayload.baseUrl,
+                apiProtocol: accountPayload.apiProtocol,
                 model: accountPayload.model,
                 enabled: accountPayload.enabled,
               },
@@ -1118,7 +1141,20 @@ function ProviderContent({
     <div className="space-y-6">
       {/* Provider selector — dropdown */}
       <div className="space-y-2">
-        <Label>{t('provider.label')}</Label>
+        <div className="flex items-center justify-between gap-3">
+          <Label>{t('provider.label')}</Label>
+          {selectedProvider && providerDocsUrl && (
+            <a
+              href={providerDocsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[13px] text-blue-500 hover:text-blue-600 font-medium inline-flex items-center gap-1"
+            >
+              {t('settings:aiProviders.dialog.customDoc')}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
+        </div>
         <div className="relative" ref={providerMenuRef}>
           <button
             type="button"
@@ -1212,7 +1248,7 @@ function ProviderContent({
               <Input
                 id="baseUrl"
                 type="text"
-                placeholder="https://api.example.com/v1"
+                placeholder={getProtocolBaseUrlPlaceholder(apiProtocol)}
                 value={baseUrl}
                 onChange={(e) => {
                   setBaseUrl(e.target.value);
@@ -1243,6 +1279,59 @@ function ProviderContent({
               <p className="text-xs text-muted-foreground">
                 {t('provider.modelIdDesc')}
               </p>
+            </div>
+          )}
+
+          {selectedProvider === 'custom' && (
+            <div className="space-y-2">
+              <Label>{t('provider.protocol')}</Label>
+              <div className="flex gap-2 text-sm">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setApiProtocol('openai-completions');
+                    onConfiguredChange(false);
+                  }}
+                  className={cn(
+                    'flex-1 py-2 px-3 rounded-lg border transition-colors',
+                    apiProtocol === 'openai-completions'
+                      ? 'bg-primary/10 border-primary/30 font-medium'
+                      : 'border-border bg-muted/40 text-muted-foreground hover:bg-muted'
+                  )}
+                >
+                  {t('provider.protocols.openaiCompletions')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setApiProtocol('openai-responses');
+                    onConfiguredChange(false);
+                  }}
+                  className={cn(
+                    'flex-1 py-2 px-3 rounded-lg border transition-colors',
+                    apiProtocol === 'openai-responses'
+                      ? 'bg-primary/10 border-primary/30 font-medium'
+                      : 'border-border bg-muted/40 text-muted-foreground hover:bg-muted'
+                  )}
+                >
+                  {t('provider.protocols.openaiResponses')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setApiProtocol('anthropic-messages');
+                    onConfiguredChange(false);
+                  }}
+                  className={cn(
+                    'flex-1 py-2 px-3 rounded-lg border transition-colors',
+                    apiProtocol === 'anthropic-messages'
+                      ? 'bg-primary/10 border-primary/30 font-medium'
+                      : 'border-border bg-muted/40 text-muted-foreground hover:bg-muted'
+                  )}
+                >
+                  {t('provider.protocols.anthropic')}
+                </button>
+              </div>
             </div>
           )}
 

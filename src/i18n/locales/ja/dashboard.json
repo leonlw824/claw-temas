@@ -10,8 +10,8 @@
     "sinceRestart": "前回の再起動から",
     "gatewayNotRunning": "ゲートウェイが停止中",
     "models": {
-        "title": "モデルマーケット",
-        "subtitle": "AI プロバイダーを管理し、トークン使用量を監視します。"
+        "title": "モデル",
+        "subtitle": "AI プロバイダーを管理し、トークン使用量を監視します"
     },
     "quickActions": {
         "title": "クイックアクション",
@@ -47,7 +47,7 @@
         "outputShort": "出力",
         "cacheShort": "キャッシュ",
         "page": "{{current}} / {{total}} ページ",
-        "prev": "前���",
+        "prev": "前へ",
         "next": "次へ",
         "unknownModel": "不明なモデル",
         "emptyForWindow": "この期間のトークン使用履歴はありません",

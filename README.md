@@ -311,10 +311,21 @@ pnpm test                 # Run unit tests
 pnpm run build:vite       # Build frontend only
 pnpm build                # Full production build (with packaging assets)
 pnpm package              # Package for current platform
-pnpm package:mac          # Package for macOS
-pnpm package:win          # Package for Windows
-pnpm package:linux        # Package for Linux
+
+# Package for specific platforms
+pnpm package:mac          # Package for macOS (with preinstalled skills)
+pnpm package:win          # Package for Windows (with preinstalled skills)
+pnpm package:linux        # Package for Linux (with preinstalled skills)
+
+# Fast packaging (skip preinstalled skills download)
+pnpm package:mac:fast     # Fast macOS package
+pnpm package:win:fast     # Fast Windows package
+pnpm package:linux:fast   # Fast Linux package
 ```
+
+> **💡 Tip**: Use `:fast` commands for faster builds during development. They skip downloading Claude Code skills from GitHub.
+>
+> See [docs/packaging.md](docs/packaging.md) for detailed packaging guide.
 ### Tech Stack
 
 | Layer | Technology |

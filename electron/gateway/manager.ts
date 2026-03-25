@@ -9,6 +9,7 @@ import WebSocket from 'ws';
 import { PORTS } from '../utils/config';
 import { JsonRpcNotification, isNotification, isResponse } from './protocol';
 import { logger } from '../utils/logger';
+import { captureTelemetryEvent, trackMetric } from '../utils/telemetry';
 import {
   loadOrCreateDeviceIdentity,
   type DeviceIdentity,
@@ -42,6 +43,12 @@ import { GatewayConnectionMonitor } from './connection-monitor';
 import { GatewayLifecycleController, LifecycleSupersededError } from './lifecycle-controller';
 import { launchGatewayProcess } from './process-launcher';
 import { GatewayRestartController } from './restart-controller';
+import { GatewayRestartGovernor } from './restart-governor';
+import {
+  DEFAULT_GATEWAY_RELOAD_POLICY,
+  loadGatewayReloadPolicy,
+  type GatewayReloadPolicy,
+} from './reload-policy';
 import { classifyGatewayStderrMessage, recordGatewayStartupStderrLine } from './startup-stderr';
 import { runGatewayStartupSequence } from './startup-orchestrator';
 
@@ -94,8 +101,20 @@ export class GatewayManager extends EventEmitter {
   private readonly connectionMonitor = new GatewayConnectionMonitor();
   private readonly lifecycleController = new GatewayLifecycleController();
   private readonly restartController = new GatewayRestartController();
+  private readonly restartGovernor = new GatewayRestartGovernor();
   private reloadDebounceTimer: NodeJS.Timeout | null = null;
+  private reloadPolicy: GatewayReloadPolicy = { ...DEFAULT_GATEWAY_RELOAD_POLICY };
+  private reloadPolicyLoadedAt = 0;
+  private reloadPolicyRefreshPromise: Promise<void> | null = null;
   private externalShutdownSupported: boolean | null = null;
+  private reconnectAttemptsTotal = 0;
+  private reconnectSuccessTotal = 0;
+  private static readonly RELOAD_POLICY_REFRESH_MS = 15_000;
+  private static readonly HEARTBEAT_INTERVAL_MS = 30_000;
+  private static readonly HEARTBEAT_TIMEOUT_MS = 12_000;
+  private static readonly HEARTBEAT_MAX_MISSES = 3;
+  public static readonly RESTART_COOLDOWN_MS = 5_000;
+  private lastRestartAt = 0;
 
   constructor(config?: Partial<ReconnectConfig>) {
     super();
@@ -105,6 +124,9 @@ export class GatewayManager extends EventEmitter {
         this.emit('status', status);
       },
       onTransition: (previousState, nextState) => {
+        if (nextState === 'running') {
+          this.restartGovernor.onRunning();
+        }
         this.restartController.flushDeferredRestart(
           `status:${previousState}->${nextState}`,
           {
@@ -182,6 +204,7 @@ export class GatewayManager extends EventEmitter {
     logger.info(`Gateway start requested (port=${this.status.port})`);
     this.lastSpawnSummary = null;
     this.shouldReconnect = true;
+    await this.refreshReloadPolicy(true);
 
     // Lazily load device identity (async file I/O + key generation).
     // Must happen before connect() which uses the identity for the handshake.
@@ -349,7 +372,27 @@ export class GatewayManager extends EventEmitter {
       return;
     }
 
-    logger.debug('Gateway restart requested');
+    const decision = this.restartGovernor.decide();
+    if (!decision.allow) {
+      const observability = this.restartGovernor.getObservability();
+      logger.warn(
+        `[gateway-restart-governor] restart suppressed reason=${decision.reason} retryAfterMs=${decision.retryAfterMs} ` +
+        `suppressed=${observability.suppressed_total} executed=${observability.executed_total} circuitOpenUntil=${observability.circuit_open_until}`,
+      );
+      const props = {
+        reason: decision.reason,
+        retry_after_ms: decision.retryAfterMs,
+        gateway_restart_suppressed_total: observability.suppressed_total,
+        gateway_restart_executed_total: observability.executed_total,
+        gateway_restart_circuit_open_until: observability.circuit_open_until,
+      };
+      trackMetric('gateway.restart.suppressed', props);
+      captureTelemetryEvent('gateway_restart_suppressed', props);
+      return;
+    }
+
+    const pidBefore = this.status.pid;
+    logger.info(`[gateway-refresh] mode=restart requested pidBefore=${pidBefore ?? 'n/a'}`);
     this.restartInFlight = (async () => {
       await this.stop();
       await this.start();
@@ -357,6 +400,19 @@ export class GatewayManager extends EventEmitter {
 
     try {
       await this.restartInFlight;
+      this.restartGovernor.recordExecuted();
+      const observability = this.restartGovernor.getObservability();
+      const props = {
+        gateway_restart_executed_total: observability.executed_total,
+        gateway_restart_suppressed_total: observability.suppressed_total,
+        gateway_restart_circuit_open_until: observability.circuit_open_until,
+      };
+      trackMetric('gateway.restart.executed', props);
+      captureTelemetryEvent('gateway_restart_executed', props);
+      logger.info(
+        `[gateway-refresh] mode=restart result=applied pidBefore=${pidBefore ?? 'n/a'} pidAfter=${this.status.pid ?? 'n/a'} ` +
+        `suppressed=${observability.suppressed_total} executed=${observability.executed_total} circuitOpenUntil=${observability.circuit_open_until}`,
+      );
     } finally {
       this.restartInFlight = null;
       this.restartController.flushDeferredRestart(
@@ -395,6 +451,16 @@ export class GatewayManager extends EventEmitter {
    * Falls back to restart on unsupported platforms or signaling failures.
    */
   async reload(): Promise<void> {
+    await this.refreshReloadPolicy();
+
+    if (this.reloadPolicy.mode === 'off' || this.reloadPolicy.mode === 'restart') {
+      logger.info(
+        `[gateway-refresh] mode=reload result=policy_forced_restart policy=${this.reloadPolicy.mode}`,
+      );
+      await this.restart();
+      return;
+    }
+
     if (this.restartController.isRestartDeferred({
       state: this.status.state,
       startLock: this.startLock,
@@ -406,13 +472,18 @@ export class GatewayManager extends EventEmitter {
       return;
     }
 
+    const pidBefore = this.process?.pid;
+    logger.info(`[gateway-refresh] mode=reload requested pid=${pidBefore ?? 'n/a'} state=${this.status.state}`);
+
     if (!this.process?.pid || this.status.state !== 'running') {
+      logger.warn('[gateway-refresh] mode=reload result=fallback_restart cause=not_running');
       logger.warn('Gateway reload requested while not running; falling back to restart');
       await this.restart();
       return;
     }
 
     if (process.platform === 'win32') {
+      logger.warn('[gateway-refresh] mode=reload result=fallback_restart cause=windows');
       logger.debug('Windows detected, falling back to Gateway restart for reload');
       await this.restart();
       return;
@@ -424,6 +495,9 @@ export class GatewayManager extends EventEmitter {
 
     // Avoid signaling a process that just came up; it will already read latest config.
     if (connectedForMs < 8000) {
+      logger.info(
+        `[gateway-refresh] mode=reload result=skipped_recent_connect connectedForMs=${connectedForMs} pid=${this.process.pid}`,
+      );
       logger.info(`Gateway connected ${connectedForMs}ms ago, skipping reload signal`);
       return;
     }
@@ -435,10 +509,17 @@ export class GatewayManager extends EventEmitter {
       // If process state doesn't recover quickly, fall back to restart.
       await new Promise((resolve) => setTimeout(resolve, 1500));
       if (this.status.state !== 'running' || !this.process?.pid) {
+        logger.warn('[gateway-refresh] mode=reload result=fallback_restart cause=post_signal_unhealthy');
         logger.warn('Gateway did not stay running after reload signal, falling back to restart');
         await this.restart();
+      } else {
+        const pidAfter = this.process.pid;
+        logger.info(
+          `[gateway-refresh] mode=reload result=applied_in_place pidBefore=${pidBefore} pidAfter=${pidAfter}`,
+        );
       }
     } catch (error) {
+      logger.warn('[gateway-refresh] mode=reload result=fallback_restart cause=signal_error');
       logger.warn('Gateway reload signal failed, falling back to restart:', error);
       await this.restart();
     }
@@ -448,17 +529,51 @@ export class GatewayManager extends EventEmitter {
    * Debounced reload — coalesces multiple rapid config-change events into one
    * in-process reload when possible.
    */
-  debouncedReload(delayMs = 1200): void {
+  debouncedReload(delayMs?: number): void {
+    void this.refreshReloadPolicy();
+    const effectiveDelay = delayMs ?? this.reloadPolicy.debounceMs;
+    if (this.reloadPolicy.mode === 'off' || this.reloadPolicy.mode === 'restart') {
+      logger.debug(
+        `Gateway reload policy=${this.reloadPolicy.mode}; routing debouncedReload to debouncedRestart (${effectiveDelay}ms)`,
+      );
+      this.debouncedRestart(effectiveDelay);
+      return;
+    }
+
     if (this.reloadDebounceTimer) {
       clearTimeout(this.reloadDebounceTimer);
     }
-    logger.debug(`Gateway reload debounced (will fire in ${delayMs}ms)`);
+    logger.debug(`Gateway reload debounced (will fire in ${effectiveDelay}ms)`);
     this.reloadDebounceTimer = setTimeout(() => {
       this.reloadDebounceTimer = null;
       void this.reload().catch((err) => {
         logger.warn('Debounced Gateway reload failed:', err);
       });
-    }, delayMs);
+    }, effectiveDelay);
+  }
+
+  private async refreshReloadPolicy(force = false): Promise<void> {
+    const now = Date.now();
+    if (!force && now - this.reloadPolicyLoadedAt < GatewayManager.RELOAD_POLICY_REFRESH_MS) {
+      return;
+    }
+
+    if (this.reloadPolicyRefreshPromise) {
+      await this.reloadPolicyRefreshPromise;
+      return;
+    }
+
+    this.reloadPolicyRefreshPromise = (async () => {
+      const nextPolicy = await loadGatewayReloadPolicy();
+      this.reloadPolicy = nextPolicy;
+      this.reloadPolicyLoadedAt = Date.now();
+    })();
+
+    try {
+      await this.reloadPolicyRefreshPromise;
+    } finally {
+      this.reloadPolicyRefreshPromise = null;
+    }
   }
 
   /**
@@ -583,6 +698,7 @@ export class GatewayManager extends EventEmitter {
       onExit: (exitedChild, code) => {
         this.processExitCode = code;
         this.ownsProcess = false;
+        this.connectionMonitor.clear();
         if (this.process === exitedChild) {
           this.process = null;
         }
@@ -618,6 +734,9 @@ export class GatewayManager extends EventEmitter {
       getToken: async () => await import('../utils/store').then(({ getSetting }) => getSetting('gatewayToken')),
       onHandshakeComplete: (ws) => {
         this.ws = ws;
+        ws.on('pong', () => {
+          this.connectionMonitor.markAlive('pong');
+        });
         this.setStatus({
           state: 'running',
           port,
@@ -629,6 +748,7 @@ export class GatewayManager extends EventEmitter {
         this.handleMessage(message);
       },
       onCloseAfterHandshake: () => {
+        this.connectionMonitor.clear();
         if (this.status.state === 'running') {
           this.setStatus({ state: 'stopped' });
           this.scheduleReconnect();
@@ -641,6 +761,8 @@ export class GatewayManager extends EventEmitter {
    * Handle incoming WebSocket message
    */
   private handleMessage(message: unknown): void {
+    this.connectionMonitor.markAlive('message');
+
     if (typeof message !== 'object' || message === null) {
       logger.debug('Received non-object Gateway message');
       return;
@@ -705,10 +827,33 @@ export class GatewayManager extends EventEmitter {
    * Start ping interval to keep connection alive
    */
   private startPing(): void {
-    this.connectionMonitor.startPing(() => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        this.ws.ping();
-      }
+    this.connectionMonitor.startPing({
+      intervalMs: GatewayManager.HEARTBEAT_INTERVAL_MS,
+      timeoutMs: GatewayManager.HEARTBEAT_TIMEOUT_MS,
+      maxConsecutiveMisses: GatewayManager.HEARTBEAT_MAX_MISSES,
+      sendPing: () => {
+        if (this.ws?.readyState === WebSocket.OPEN) {
+          this.ws.ping();
+        }
+      },
+      onHeartbeatTimeout: ({ consecutiveMisses, timeoutMs }) => {
+        if (this.status.state !== 'running' || !this.shouldReconnect) {
+          return;
+        }
+        const ws = this.ws;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          return;
+        }
+
+        logger.warn(
+          `Gateway heartbeat timed out after ${consecutiveMisses} consecutive misses (timeout=${timeoutMs}ms); terminating stale socket`,
+        );
+        try {
+          ws.terminate();
+        } catch (error) {
+          logger.warn('Failed to terminate stale Gateway socket after heartbeat timeout:', error);
+        }
+      },
     });
   }
 
@@ -744,9 +889,11 @@ export class GatewayManager extends EventEmitter {
       return;
     }
 
+    const cooldownRemaining = Math.max(0, GatewayManager.RESTART_COOLDOWN_MS - (Date.now() - this.lastRestartAt));
     const { delay, nextAttempt, maxAttempts } = decision;
+    const effectiveDelay = Math.max(delay, cooldownRemaining);
     this.reconnectAttempts = nextAttempt;
-    logger.warn(`Scheduling Gateway reconnect attempt ${nextAttempt}/${maxAttempts} in ${delay}ms`);
+    logger.warn(`Scheduling Gateway reconnect attempt ${nextAttempt}/${maxAttempts} in ${effectiveDelay}ms`);
 
     this.setStatus({
       state: 'reconnecting',
@@ -765,16 +912,58 @@ export class GatewayManager extends EventEmitter {
         logger.debug(`Skipping reconnect attempt: ${skipReason}`);
         return;
       }
+      const attemptNo = this.reconnectAttempts;
+      this.reconnectAttemptsTotal += 1;
       try {
         // Use the guarded start() flow so reconnect attempts cannot bypass
         // lifecycle locking and accidentally start duplicate Gateway processes.
         await this.start();
+        this.reconnectSuccessTotal += 1;
+        this.emitReconnectMetric('success', {
+          attemptNo,
+          maxAttempts,
+          delayMs: effectiveDelay,
+        });
         this.reconnectAttempts = 0;
       } catch (error) {
         logger.error('Gateway reconnection attempt failed:', error);
+        this.emitReconnectMetric('failure', {
+          attemptNo,
+          maxAttempts,
+          delayMs: effectiveDelay,
+          error: error instanceof Error ? error.message : String(error),
+        });
         this.scheduleReconnect();
       }
-    }, delay);
+    }, effectiveDelay);
+  }
+
+  private emitReconnectMetric(
+    outcome: 'success' | 'failure',
+    payload: {
+      attemptNo: number;
+      maxAttempts: number;
+      delayMs: number;
+      error?: string;
+    },
+  ): void {
+    const successRate = this.reconnectAttemptsTotal > 0
+      ? this.reconnectSuccessTotal / this.reconnectAttemptsTotal
+      : 0;
+
+    const properties = {
+      outcome,
+      attemptNo: payload.attemptNo,
+      maxAttempts: payload.maxAttempts,
+      delayMs: payload.delayMs,
+      gateway_reconnect_success_count: this.reconnectSuccessTotal,
+      gateway_reconnect_attempt_count: this.reconnectAttemptsTotal,
+      gateway_reconnect_success_rate: Number(successRate.toFixed(4)),
+      ...(payload.error ? { error: payload.error } : {}),
+    };
+
+    trackMetric('gateway.reconnect', properties);
+    captureTelemetryEvent('gateway_reconnect', properties);
   }
 
   /**

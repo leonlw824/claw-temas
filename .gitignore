@@ -1,11 +1,13 @@
 # Dependencies
 node_modules/
+plugins/*/node_modules/
 .pnp
 .pnp.js
 
 # Build outputs
 dist/
 dist-electron/
+dist-apps/
 release/
 *.local
 
@@ -52,6 +54,7 @@ coverage/
 *.rpm
 
 resources/bin
+resources/downloads/
 
 # Secrets
 *.p12
@@ -59,6 +62,8 @@ resources/bin
 *.key
 
 build/
+artifacts/
+docs/pr-session-notes-*.md
 
 .cursor/
 .pnpm-store/

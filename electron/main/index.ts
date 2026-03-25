@@ -13,20 +13,32 @@ import { createMenu } from './menu';
 import { appUpdater, registerUpdateHandlers } from './updater';
 import { logger } from '../utils/logger';
 import { warmupNetworkOptimization } from '../utils/uv-env';
+import { initTelemetry } from '../utils/telemetry';
 
 import { ClawHubService } from '../gateway/clawhub';
 import { ensureClawXContext, repairClawXOnlyBootstrapFiles } from '../utils/openclaw-workspace';
 import { autoInstallCliIfNeeded, generateCompletionCache, installCompletionToProfile } from '../utils/openclaw-cli';
 import { isQuitting, setQuitting } from './app-state';
 import { applyProxySettings } from './proxy';
+import { syncLaunchAtStartupSettingFromStore } from './launch-at-startup';
+import {
+  clearPendingSecondInstanceFocus,
+  consumeMainWindowReady,
+  createMainWindowFocusState,
+  requestSecondInstanceFocus,
+} from './main-window-focus';
 import { getSetting } from '../utils/store';
-import { ensureBuiltinSkillsInstalled } from '../utils/skill-config';
+import { ensureBuiltinSkillsInstalled, ensurePreinstalledSkillsInstalled } from '../utils/skill-config';
+import { ensureAllBundledPluginsInstalled } from '../utils/plugin-install';
+import { syncAppsWithConfig } from '../utils/app-config';
 import { startHostApiServer } from '../api/server';
 import { HostEventBus } from '../api/event-bus';
 import { deviceOAuthManager } from '../utils/device-oauth';
 import { browserOAuthManager } from '../utils/browser-oauth';
 import { whatsAppLoginManager } from '../utils/whatsapp-login';
 import { syncAllProviderAuthToRuntime } from '../services/providers/provider-runtime-sync';
+
+const WINDOWS_APP_USER_MODEL_ID = 'app.clawx.desktop';
 
 // Disable GPU hardware acceleration globally for maximum stability across
 // all GPU configurations (no GPU, integrated, discrete).
@@ -56,17 +68,19 @@ if (process.platform === 'linux') {
 // Without this, two instances each spawn their own gateway process on the
 // same port, then each treats the other's gateway as "orphaned" and kills
 // it — creating an infinite kill/restart loop on Windows.
+// The losing process must exit immediately so it never reaches Gateway startup.
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
-  app.quit();
+  app.exit(0);
 }
 
 // Global references
 let mainWindow: BrowserWindow | null = null;
-const gatewayManager = new GatewayManager();
-const clawHubService = new ClawHubService();
-const hostEventBus = new HostEventBus();
+let gatewayManager!: GatewayManager;
+let clawHubService!: ClawHubService;
+let hostEventBus!: HostEventBus;
 let hostApiServer: Server | null = null;
+const mainWindowFocusState = createMainWindowFocusState();
 
 /**
  * Resolve the icons directory path (works in both dev and packaged mode)
@@ -100,6 +114,8 @@ function getAppIcon(): Electron.NativeImage | undefined {
  */
 function createWindow(): BrowserWindow {
   const isMac = process.platform === 'darwin';
+  const isWindows = process.platform === 'win32';
+  const useCustomTitleBar = isWindows;
 
   const win = new BrowserWindow({
     width: 1280,
@@ -114,15 +130,10 @@ function createWindow(): BrowserWindow {
       sandbox: false,
       webviewTag: true, // Enable <webview> for embedding OpenClaw Control UI
     },
-    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
+    titleBarStyle: isMac ? 'hiddenInset' : useCustomTitleBar ? 'hidden' : 'default',
     trafficLightPosition: isMac ? { x: 16, y: 16 } : undefined,
-    frame: isMac,
+    frame: isMac || !useCustomTitleBar,
     show: false,
-  });
-
-  // Show window when ready to prevent visual flash
-  win.once('ready-to-show', () => {
-    win.show();
   });
 
   // Handle external links
@@ -142,6 +153,62 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
+function focusWindow(win: BrowserWindow): void {
+  if (win.isDestroyed()) {
+    return;
+  }
+
+  if (win.isMinimized()) {
+    win.restore();
+  }
+
+  win.show();
+  win.focus();
+}
+
+function focusMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  clearPendingSecondInstanceFocus(mainWindowFocusState);
+  focusWindow(mainWindow);
+}
+
+function createMainWindow(): BrowserWindow {
+  const win = createWindow();
+
+  win.once('ready-to-show', () => {
+    if (mainWindow !== win) {
+      return;
+    }
+
+    const action = consumeMainWindowReady(mainWindowFocusState);
+    if (action === 'focus') {
+      focusWindow(win);
+      return;
+    }
+
+    win.show();
+  });
+
+  win.on('close', (event) => {
+    if (!isQuitting()) {
+      event.preventDefault();
+      win.hide();
+    }
+  });
+
+  win.on('closed', () => {
+    if (mainWindow === win) {
+      mainWindow = null;
+    }
+  });
+
+  mainWindow = win;
+  return win;
+}
+
 /**
  * Initialize the application
  */
@@ -156,17 +223,21 @@ async function initialize(): Promise<void> {
   // Warm up network optimization (non-blocking)
   void warmupNetworkOptimization();
 
+  // Initialize Telemetry early
+  await initTelemetry();
+
   // Apply persisted proxy settings before creating windows or network requests.
   await applyProxySettings();
+  await syncLaunchAtStartupSettingFromStore();
 
   // Set application menu
   createMenu();
 
   // Create the main window
-  mainWindow = createWindow();
+  const window = createMainWindow();
 
   // Create system tray
-  createTray(mainWindow);
+  createTray(window);
 
   // Override security headers ONLY for the OpenClaw Gateway Control UI.
   // The URL filter ensures this callback only fires for gateway requests,
@@ -192,32 +263,20 @@ async function initialize(): Promise<void> {
   );
 
   // Register IPC handlers
-  registerIpcHandlers(gatewayManager, clawHubService, mainWindow);
+  registerIpcHandlers(gatewayManager, clawHubService, window);
 
   hostApiServer = startHostApiServer({
     gatewayManager,
     clawHubService,
     eventBus: hostEventBus,
-    mainWindow,
+    mainWindow: window,
   });
 
   // Register update handlers
-  registerUpdateHandlers(appUpdater, mainWindow);
+  registerUpdateHandlers(appUpdater, window);
 
   // Note: Auto-check for updates is driven by the renderer (update store init)
   // so it respects the user's "Auto-check for updates" setting.
-
-  // Minimize to tray on close instead of quitting (macOS & Windows)
-  mainWindow.on('close', (event) => {
-    if (!isQuitting()) {
-      event.preventDefault();
-      mainWindow?.hide();
-    }
-  });
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
 
   // Repair any bootstrap files that only contain ClawX markers (no OpenClaw
   // template content). This fixes a race condition where ensureClawXContext()
@@ -230,6 +289,25 @@ async function initialize(): Promise<void> {
   // to ~/.openclaw/skills/ so they are immediately available without manual install.
   void ensureBuiltinSkillsInstalled().catch((error) => {
     logger.warn('Failed to install built-in skills:', error);
+  });
+
+  // Pre-deploy bundled third-party skills from resources/preinstalled-skills.
+  // This installs full skill directories (not only SKILL.md) in an idempotent,
+  // non-destructive way and never blocks startup.
+  void ensurePreinstalledSkillsInstalled().catch((error) => {
+    logger.warn('Failed to install preinstalled skills:', error);
+  });
+
+  // Pre-deploy/upgrade bundled OpenClaw plugins (dingtalk, wecom, qqbot, feishu)
+  // to ~/.openclaw/extensions/ so they are always up-to-date after an app update.
+  void ensureAllBundledPluginsInstalled().catch((error) => {
+    logger.warn('Failed to install/upgrade bundled plugins:', error);
+  });
+
+  // Scan and sync extension apps from ~/.openclaw/apps/
+  // This discovers all deployed apps and syncs them to openclaw.json
+  void syncAppsWithConfig().catch((error) => {
+    logger.warn('Failed to sync apps:', error);
   });
 
   // Bridge gateway and host-side events before any auto-start logic runs, so
@@ -341,48 +419,66 @@ async function initialize(): Promise<void> {
   });
 }
 
-// When a second instance is launched, focus the existing window instead.
-app.on('second-instance', () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
+if (gotTheLock) {
+  if (process.platform === 'win32') {
+    app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);
   }
-});
 
-// Application lifecycle
-app.whenReady().then(() => {
-  initialize();
+  gatewayManager = new GatewayManager();
+  clawHubService = new ClawHubService();
+  hostEventBus = new HostEventBus();
 
-  // Register activate handler AFTER app is ready to prevent
-  // "Cannot create BrowserWindow before app is ready" on macOS.
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createWindow();
-    } else if (mainWindow && !mainWindow.isDestroyed()) {
-      // On macOS, clicking the dock icon should show the window if it's hidden
-      mainWindow.show();
-      mainWindow.focus();
+  // When a second instance is launched, focus the existing window instead.
+  app.on('second-instance', () => {
+    logger.info('Second ClawX instance detected; redirecting to the existing window');
+
+    const focusRequest = requestSecondInstanceFocus(
+      mainWindowFocusState,
+      Boolean(mainWindow && !mainWindow.isDestroyed()),
+    );
+
+    if (focusRequest === 'focus-now') {
+      focusMainWindow();
+      return;
+    }
+
+    logger.debug('Main window is not ready yet; deferring second-instance focus until ready-to-show');
+  });
+
+  // Application lifecycle
+  app.whenReady().then(() => {
+    void initialize().catch((error) => {
+      logger.error('Application initialization failed:', error);
+    });
+
+    // Register activate handler AFTER app is ready to prevent
+    // "Cannot create BrowserWindow before app is ready" on macOS.
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createMainWindow();
+      } else {
+        focusMainWindow();
+      }
+    });
+  });
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit();
     }
   });
-});
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
-
-app.on('before-quit', () => {
-  setQuitting();
-  hostEventBus.closeAll();
-  hostApiServer?.close();
-  // Fire-and-forget: do not await gatewayManager.stop() here.
-  // Awaiting inside before-quit can stall Electron's quit sequence.
-  void gatewayManager.stop().catch((err) => {
-    logger.warn('gatewayManager.stop() error during quit:', err);
+  app.on('before-quit', () => {
+    setQuitting();
+    hostEventBus.closeAll();
+    hostApiServer?.close();
+    // Fire-and-forget: do not await gatewayManager.stop() here.
+    // Awaiting inside before-quit can stall Electron's quit sequence.
+    void gatewayManager.stop().catch((err) => {
+      logger.warn('gatewayManager.stop() error during quit:', err);
+    });
   });
-});
+}
 
 // Export for testing
 export { mainWindow, gatewayManager };

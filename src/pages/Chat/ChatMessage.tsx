@@ -431,8 +431,21 @@ function FileIcon({ mimeType, className }: { mimeType: string; className?: strin
 }
 
 function FileCard({ file }: { file: AttachedFileMeta }) {
+  const handleOpen = useCallback(() => {
+    if (file.filePath) {
+      invokeIpc('shell:openPath', file.filePath);
+    }
+  }, [file.filePath]);
+
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-black/10 dark:border-white/10 px-3 py-2.5 bg-black/5 dark:bg-white/5 max-w-[220px]">
+    <div 
+      className={cn(
+        "flex items-center gap-3 rounded-xl border border-black/10 dark:border-white/10 px-3 py-2.5 bg-black/5 dark:bg-white/5 max-w-[220px]",
+        file.filePath && "cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+      )}
+      onClick={handleOpen}
+      title={file.filePath ? "Open file" : undefined}
+    >
       <FileIcon mimeType={file.mimeType} className="h-5 w-5 shrink-0 text-muted-foreground" />
       <div className="min-w-0 overflow-hidden">
         <p className="text-xs font-medium truncate">{file.fileName}</p>

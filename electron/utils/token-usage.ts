@@ -15,12 +15,45 @@ export {
   type TokenUsageHistoryEntry,
 } from './token-usage-core';
 
+async function listAgentIdsWithSessionDirs(): Promise<string[]> {
+  const openclawDir = getOpenClawConfigDir();
+  const agentsDir = join(openclawDir, 'agents');
+  const agentIds = new Set<string>();
+
+  try {
+    for (const agentId of await listConfiguredAgentIds()) {
+      const normalized = agentId.trim();
+      if (normalized) {
+        agentIds.add(normalized);
+      }
+    }
+  } catch {
+    // Ignore config discovery failures and fall back to disk scan.
+  }
+
+  try {
+    const agentEntries = await readdir(agentsDir, { withFileTypes: true });
+    for (const entry of agentEntries) {
+      if (entry.isDirectory()) {
+        const normalized = entry.name.trim();
+        if (normalized) {
+          agentIds.add(normalized);
+        }
+      }
+    }
+  } catch {
+    // Ignore disk discovery failures and return whatever we already found.
+  }
+
+  return [...agentIds];
+}
+
 async function listRecentSessionFiles(): Promise<Array<{ filePath: string; sessionId: string; agentId: string; mtimeMs: number }>> {
   const openclawDir = getOpenClawConfigDir();
   const agentsDir = join(openclawDir, 'agents');
 
   try {
-    const agentEntries = await listConfiguredAgentIds();
+    const agentEntries = await listAgentIdsWithSessionDirs();
     const files: Array<{ filePath: string; sessionId: string; agentId: string; mtimeMs: number }> = [];
 
     for (const agentId of agentEntries) {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ChevronLeft,
@@ -12,25 +12,15 @@ import { hostApiFetch } from '@/lib/host-api';
 import { trackUiEvent } from '@/lib/telemetry';
 import { ProvidersSettings } from '@/components/settings/ProvidersSettings';
 import { FeedbackState } from '@/components/common/FeedbackState';
-
-type UsageHistoryEntry = {
-  timestamp: string;
-  sessionId: string;
-  agentId: string;
-  model?: string;
-  provider?: string;
-  content?: string;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  totalTokens: number;
-  costUsd?: number;
-};
-
-type UsageWindow = '7d' | '30d' | 'all';
-type UsageGroupBy = 'model' | 'day';
-const USAGE_FETCH_MAX_ATTEMPTS = 6;
+import {
+  filterUsageHistoryByWindow,
+  groupUsageHistory,
+  type UsageGroupBy,
+  type UsageHistoryEntry,
+  type UsageWindow,
+} from './usage-history';
+const DEFAULT_USAGE_FETCH_MAX_ATTEMPTS = 2;
+const WINDOWS_USAGE_FETCH_MAX_ATTEMPTS = 3;
 const USAGE_FETCH_RETRY_DELAY_MS = 1500;
 
 export function Models() {
@@ -38,12 +28,40 @@ export function Models() {
   const gatewayStatus = useGatewayStore((state) => state.status);
   const devModeUnlocked = useSettingsStore((state) => state.devModeUnlocked);
   const isGatewayRunning = gatewayStatus.state === 'running';
+  const usageFetchMaxAttempts = window.electron.platform === 'win32'
+    ? WINDOWS_USAGE_FETCH_MAX_ATTEMPTS
+    : DEFAULT_USAGE_FETCH_MAX_ATTEMPTS;
 
-  const [usageHistory, setUsageHistory] = useState<UsageHistoryEntry[]>([]);
   const [usageGroupBy, setUsageGroupBy] = useState<UsageGroupBy>('model');
   const [usageWindow, setUsageWindow] = useState<UsageWindow>('7d');
   const [usagePage, setUsagePage] = useState(1);
   const [selectedUsageEntry, setSelectedUsageEntry] = useState<UsageHistoryEntry | null>(null);
+
+  type FetchState = {
+    status: 'idle' | 'loading' | 'done';
+    data: UsageHistoryEntry[];
+  };
+  type FetchAction =
+    | { type: 'start' }
+    | { type: 'done'; data: UsageHistoryEntry[] }
+    | { type: 'reset' };
+
+  const [fetchState, dispatchFetch] = useReducer(
+    (state: FetchState, action: FetchAction): FetchState => {
+      switch (action.type) {
+        case 'start':
+          return { status: 'loading', data: state.data };
+        case 'done':
+          return { status: 'done', data: action.data };
+        case 'reset':
+          return { status: 'idle', data: [] };
+        default:
+          return state;
+      }
+    },
+    { status: 'idle' as const, data: [] as UsageHistoryEntry[] },
+  );
+
   const usageFetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const usageFetchGenerationRef = useRef(0);
 
@@ -57,8 +75,12 @@ export function Models() {
       usageFetchTimerRef.current = null;
     }
 
-    if (!isGatewayRunning) return;
+    if (!isGatewayRunning) {
+      dispatchFetch({ type: 'reset' });
+      return;
+    }
 
+    dispatchFetch({ type: 'start' });
     const generation = usageFetchGenerationRef.current + 1;
     usageFetchGenerationRef.current = generation;
     const restartMarker = `${gatewayStatus.pid ?? 'na'}:${gatewayStatus.connectedAt ?? 'na'}`;
@@ -66,6 +88,17 @@ export function Models() {
       generation,
       restartMarker,
     });
+
+    // Safety timeout: if the fetch cycle hasn't resolved after 30 s,
+    // force-resolve to "done" with empty data to avoid an infinite spinner.
+    const safetyTimeout = setTimeout(() => {
+      if (usageFetchGenerationRef.current !== generation) return;
+      trackUiEvent('models.token_usage_fetch_safety_timeout', {
+        generation,
+        restartMarker,
+      });
+      dispatchFetch({ type: 'done', data: [] });
+    }, 30_000);
 
     const fetchUsageHistoryWithRetry = async (attempt: number) => {
       trackUiEvent('models.token_usage_fetch_attempt', {
@@ -78,7 +111,6 @@ export function Models() {
         if (usageFetchGenerationRef.current !== generation) return;
 
         const normalized = Array.isArray(entries) ? entries : [];
-        setUsageHistory(normalized);
         setUsagePage(1);
         trackUiEvent('models.token_usage_fetch_succeeded', {
           generation,
@@ -87,7 +119,7 @@ export function Models() {
           restartMarker,
         });
 
-        if (normalized.length === 0 && attempt < USAGE_FETCH_MAX_ATTEMPTS) {
+        if (normalized.length === 0 && attempt < usageFetchMaxAttempts) {
           trackUiEvent('models.token_usage_fetch_retry_scheduled', {
             generation,
             attempt,
@@ -97,13 +129,16 @@ export function Models() {
           usageFetchTimerRef.current = setTimeout(() => {
             void fetchUsageHistoryWithRetry(attempt + 1);
           }, USAGE_FETCH_RETRY_DELAY_MS);
-        } else if (normalized.length === 0) {
-          trackUiEvent('models.token_usage_fetch_exhausted', {
-            generation,
-            attempt,
-            reason: 'empty',
-            restartMarker,
-          });
+        } else {
+          if (normalized.length === 0) {
+            trackUiEvent('models.token_usage_fetch_exhausted', {
+              generation,
+              attempt,
+              reason: 'empty',
+              restartMarker,
+            });
+          }
+          dispatchFetch({ type: 'done', data: normalized });
         }
       } catch (error) {
         if (usageFetchGenerationRef.current !== generation) return;
@@ -113,7 +148,7 @@ export function Models() {
           restartMarker,
           message: error instanceof Error ? error.message : String(error),
         });
-        if (attempt < USAGE_FETCH_MAX_ATTEMPTS) {
+        if (attempt < usageFetchMaxAttempts) {
           trackUiEvent('models.token_usage_fetch_retry_scheduled', {
             generation,
             attempt,
@@ -125,7 +160,7 @@ export function Models() {
           }, USAGE_FETCH_RETRY_DELAY_MS);
           return;
         }
-        setUsageHistory([]);
+        dispatchFetch({ type: 'done', data: [] });
         trackUiEvent('models.token_usage_fetch_exhausted', {
           generation,
           attempt,
@@ -138,33 +173,35 @@ export function Models() {
     void fetchUsageHistoryWithRetry(1);
 
     return () => {
+      clearTimeout(safetyTimeout);
       if (usageFetchTimerRef.current) {
         clearTimeout(usageFetchTimerRef.current);
         usageFetchTimerRef.current = null;
       }
     };
-  }, [isGatewayRunning, gatewayStatus.connectedAt, gatewayStatus.pid]);
+  }, [isGatewayRunning, gatewayStatus.connectedAt, gatewayStatus.pid, usageFetchMaxAttempts]);
 
+  const usageHistory = fetchState.data;
   const visibleUsageHistory = isGatewayRunning ? usageHistory : [];
   const filteredUsageHistory = filterUsageHistoryByWindow(visibleUsageHistory, usageWindow);
   const usageGroups = groupUsageHistory(filteredUsageHistory, usageGroupBy);
-  const usagePageSize = 10;
+  const usagePageSize = 5;
   const usageTotalPages = Math.max(1, Math.ceil(filteredUsageHistory.length / usagePageSize));
   const safeUsagePage = Math.min(usagePage, usageTotalPages);
   const pagedUsageHistory = filteredUsageHistory.slice((safeUsagePage - 1) * usagePageSize, safeUsagePage * usagePageSize);
-  const usageLoading = isGatewayRunning && visibleUsageHistory.length === 0;
+  const usageLoading = isGatewayRunning && fetchState.status === 'loading';
 
   return (
     <div className="flex flex-col -m-6 dark:bg-background h-[calc(100vh-2.5rem)] overflow-hidden">
-      <div className="w-full max-w-6xl mx-auto flex flex-col h-full p-10 pt-16">
-
+      <div className="w-full max-w-5xl mx-auto flex flex-col h-full p-10 pt-16">
+        
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-start justify-between mb-12 shrink-0 gap-4">
           <div>
             <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-3 font-normal tracking-tight" style={{ fontFamily: 'Georgia, Cambria, "Times New Roman", Times, serif' }}>
               {t('dashboard:models.title')}
             </h1>
-            <p className="text-[17px] text-foreground/80 font-medium">
+            <p className="text-[17px] text-foreground/70 font-medium">
               {t('dashboard:models.subtitle')}
             </p>
           </div>
@@ -172,7 +209,7 @@ export function Models() {
 
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto pr-2 pb-10 min-h-0 -mr-2 space-y-12">
-
+          
           {/* AI Providers Section */}
           <ProvidersSettings />
 
@@ -424,83 +461,6 @@ function formatUsageTimestamp(timestamp: string): string {
   }).format(date);
 }
 
-function groupUsageHistory(
-  entries: UsageHistoryEntry[],
-  groupBy: UsageGroupBy,
-): Array<{
-  label: string;
-  totalTokens: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheTokens: number;
-  sortKey: number | string;
-}> {
-  const grouped = new Map<string, {
-    label: string;
-    totalTokens: number;
-    inputTokens: number;
-    outputTokens: number;
-    cacheTokens: number;
-    sortKey: number | string;
-  }>();
-
-  for (const entry of entries) {
-    const label = groupBy === 'model'
-      ? (entry.model || 'Unknown')
-      : formatUsageDay(entry.timestamp);
-    const current = grouped.get(label) ?? {
-      label,
-      totalTokens: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheTokens: 0,
-      sortKey: groupBy === 'day' ? getUsageDaySortKey(entry.timestamp) : label.toLowerCase(),
-    };
-    current.totalTokens += entry.totalTokens;
-    current.inputTokens += entry.inputTokens;
-    current.outputTokens += entry.outputTokens;
-    current.cacheTokens += entry.cacheReadTokens + entry.cacheWriteTokens;
-    grouped.set(label, current);
-  }
-
-  return Array.from(grouped.values())
-    .sort((a, b) => {
-      if (groupBy === 'day') {
-        return Number(a.sortKey) - Number(b.sortKey);
-      }
-      return b.totalTokens - a.totalTokens;
-    })
-    .slice(0, 8);
-}
-
-function formatUsageDay(timestamp: string): string {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return timestamp;
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-  }).format(date);
-}
-
-function getUsageDaySortKey(timestamp: string): number {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return 0;
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
-}
-
-function filterUsageHistoryByWindow(entries: UsageHistoryEntry[], window: UsageWindow): UsageHistoryEntry[] {
-  if (window === 'all') return entries;
-
-  const now = Date.now();
-  const days = window === '7d' ? 7 : 30;
-  const cutoff = now - days * 24 * 60 * 60 * 1000;
-
-  return entries.filter((entry) => {
-    const timestamp = Date.parse(entry.timestamp);
-    return Number.isFinite(timestamp) && timestamp >= cutoff;
-  });
-}
 
 // 垂直柱状图组件
 function VerticalBarChart({
@@ -540,7 +500,7 @@ function VerticalBarChart({
 
   const maxTokens = Math.max(...groups.map((group) => group.totalTokens), 1);
 
-  // 计算 Y 轴刻度
+// 计算 Y 轴刻度
   const getYAxisTicks = (max: number) => {
     const tickCount = 5;
     const step = Math.ceil(max / tickCount / 1000) * 1000; // 向上取整到千位
@@ -677,8 +637,6 @@ function VerticalBarChart({
   );
 }
 
-export default Models;
-
 function UsageContentPopup({
   entry,
   onClose,
@@ -726,3 +684,5 @@ function UsageContentPopup({
     </div>
   );
 }
+
+export default Models;

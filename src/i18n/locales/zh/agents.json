@@ -9,7 +9,7 @@
     "inherited": "继承",
     "none": "无",
     "modelLine": "Model: {{model}}{{suffix}}",
-    "channelsLine": "Channels: {{channels}}",
+    "channelsLine": "频道: {{channels}}",
     "deleteAgent": "删除 Agent",
     "settings": "设置",
     "chatWithAgent": "开始对话",
@@ -26,10 +26,16 @@
     },
     "settingsDialog": {
         "title": "{{name}} 设置",
-        "description": "更新 Agent 名称，并管理哪些 Channel 归属于这个 Agent。",
+        "description": "更新 Agent 名称，并管理哪些频道归属于这个 Agent。",
         "nameLabel": "Agent 名称",
         "agentIdLabel": "Agent ID",
         "modelLabel": "Model",
+        "channelsTitle": "频道",
+        "channelsDescription": "该列表为只读。频道账号与绑定关系请在 Channels 页面管理。",
+        "mainAccount": "主账号",
+        "channelsManagedInChannels": "该 Agent 绑定了频道类型，但具体账号绑定请在 Channels 页面查看。",
+        "addChannel": "添加频道",
+        "noChannels": "这个 Agent 还没有分配任何频道。",
         "modelPlaceholder": "选择或输入模型名称",
         "avatarLabel": "头像",
         "avatarUpload": "上传头像",
@@ -39,25 +45,22 @@
         "soulPlaceholder": "输入个人介绍...",
         "behaviorLabel": "行为准则",
         "behaviorDescription": "编辑行为准则内容（AGENTS.md）",
-        "behaviorPlaceholder": "输入行为准则...",
-        "channelsTitle": "Channels",
-        "channelsDescription": "每种 Channel 类型在 ClawTeams 中只保留一份配置。在这里保存已配置的 Channel 会将归属切换到当前 Agent。",
-        "addChannel": "添加 Channel",
-        "noChannels": "这个 Agent 还没有分配任何 Channel。"
+        "behaviorPlaceholder": "输入行为准则..."
     },
     "removeChannelDialog": {
-        "title": "移除 Channel",
-        "message": "确认移除 {{name}}？这会删除当前的 Channel 配置。"
+        "title": "移除频道",
+        "message": "确认移除 {{name}}？这会删除当前的频道配置。"
     },
     "toast": {
         "agentCreated": "Agent 已创建",
         "agentCreateFailed": "创建 Agent 失败：{{error}}",
         "agentDeleted": "Agent 已删除",
+        "agentDeleteFailed": "删除 Agent 失败：{{error}}",
         "agentUpdated": "Agent 已更新",
         "agentUpdateFailed": "更新 Agent 失败：{{error}}",
         "channelAssigned": "{{channel}} 已分配给 Agent",
-        "channelAssignFailed": "分配 Channel 失败：{{error}}",
+        "channelAssignFailed": "分配频道失败：{{error}}",
         "channelRemoved": "{{channel}} 已移除",
-        "channelRemoveFailed": "移除 Channel 失败：{{error}}"
+        "channelRemoveFailed": "移除频道失败：{{error}}"
     }
 }

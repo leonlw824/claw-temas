@@ -1,0 +1,19 @@
+{
+  "pageTitle": "应用",
+  "subtitle": "管理已安装的应用",
+  "refresh": "刷新",
+  "noApps": "暂无已安装的应用",
+  "internal": "内置",
+  "external": "外部",
+  "noDescription": "暂无描述",
+  "enable": "启用",
+  "disable": "禁用",
+  "confirmUninstall": "确定要卸载此应用吗？",
+  "toast": {
+    "appEnabled": "应用已启用",
+    "appDisabled": "应用已禁用",
+    "appUninstalled": "应用已卸载",
+    "toggleFailed": "切换应用状态失败：{{error}}",
+    "uninstallFailed": "卸载应用失败：{{error}}"
+  }
+}

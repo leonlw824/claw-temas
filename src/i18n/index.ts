@@ -1,5 +1,10 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
+import {
+    SUPPORTED_LANGUAGE_CODES,
+    resolveSupportedLanguage,
+    type LanguageCode,
+} from '../../shared/language';
 
 // EN
 import enCommon from './locales/en/common.json';
@@ -13,6 +18,7 @@ import enCron from './locales/en/cron.json';
 import enSetup from './locales/en/setup.json';
 import enTeams from './locales/en/teams.json';
 import enTasks from './locales/en/tasks.json';
+import enApps from './locales/en/apps.json';
 
 // ZH
 import zhCommon from './locales/zh/common.json';
@@ -26,6 +32,7 @@ import zhCron from './locales/zh/cron.json';
 import zhSetup from './locales/zh/setup.json';
 import zhTeams from './locales/zh/teams.json';
 import zhTasks from './locales/zh/tasks.json';
+import zhApps from './locales/zh/apps.json';
 
 // JA
 import jaCommon from './locales/ja/common.json';
@@ -39,14 +46,13 @@ import jaCron from './locales/ja/cron.json';
 import jaSetup from './locales/ja/setup.json';
 import jaTeams from './locales/ja/teams.json';
 import jaTasks from './locales/ja/tasks.json';
+import jaApps from './locales/ja/apps.json';
 
 export const SUPPORTED_LANGUAGES = [
     { code: 'en', label: 'English' },
     { code: 'zh', label: '中文' },
     { code: 'ja', label: '日本語' },
-] as const;
-
-export type LanguageCode = (typeof SUPPORTED_LANGUAGES)[number]['code'];
+] as const satisfies ReadonlyArray<{ code: LanguageCode; label: string }>;
 
 const resources = {
     en: {
@@ -61,6 +67,7 @@ const resources = {
         setup: enSetup,
         teams: enTeams,
         tasks: enTasks,
+        apps: enApps,
     },
     zh: {
         common: zhCommon,
@@ -74,6 +81,7 @@ const resources = {
         setup: zhSetup,
         teams: zhTeams,
         tasks: zhTasks,
+        apps: zhApps,
     },
     ja: {
         common: jaCommon,
@@ -87,6 +95,7 @@ const resources = {
         setup: jaSetup,
         teams: jaTeams,
         tasks: jaTasks,
+        apps: jaApps,
     },
 };
 
@@ -94,10 +103,11 @@ i18n
     .use(initReactI18next)
     .init({
         resources,
-        lng: 'en', // will be overridden by settings store
+        lng: resolveSupportedLanguage(typeof navigator !== 'undefined' ? navigator.language : undefined),
         fallbackLng: 'en',
+        supportedLngs: [...SUPPORTED_LANGUAGE_CODES],
         defaultNS: 'common',
-        ns: ['common', 'settings', 'dashboard', 'chat', 'channels', 'agents', 'skills', 'cron', 'setup', 'teams', 'tasks'],
+        ns: ['common', 'settings', 'dashboard', 'chat', 'channels', 'agents', 'skills', 'cron', 'setup', 'teams', 'tasks', 'apps'],
         interpolation: {
             escapeValue: false, // React already escapes
         },

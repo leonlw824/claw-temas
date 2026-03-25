@@ -21,7 +21,7 @@ import { Play, Square, FileText, ScrollText, Trash2, RefreshCw, Plus, FolderOpen
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { WorkflowVisualization } from '@/components/WorkflowVisualization';
-import type { Task, TaskStatus, CreateTaskData, TaskType } from '@/types/task';
+import type { Task, TaskStatus, CreateTaskData } from '@/types/task';
 import type { Team } from '@/types/team';
 
 function TaskStatusBadge({ status }: { status: TaskStatus }) {
@@ -139,10 +139,6 @@ function TaskCard({ task, team, agents, onStart, onStop, onResume, onViewResult,
             <div className="flex items-center gap-2">
               <span className="font-medium">{t('taskCard.team')}:</span>
               <span>{teamName}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="font-medium">{t('taskCard.type')}:</span>
-              <span>{t(`taskTypes.${task.type}`)}</span>
             </div>
             {task.workspacePath && (
               <div className="flex items-center gap-2">
@@ -309,11 +305,10 @@ export function Tasks() {
   const [reExecuteTask, setReExecuteTask] = useState<Task | null>(null);
   const [reExecuteDescription, setReExecuteDescription] = useState('');
 
-  const [formData, setFormData] = useState<CreateTaskData>({
+  const [formData, setFormData] = useState<Omit<CreateTaskData, 'type'>>({
     name: '',
     description: '',
     teamId: '',
-    type: 'file',
   });
 
   useEffect(() => {
@@ -349,15 +344,16 @@ export function Tasks() {
   };
 
   const handleCreateTask = async () => {
-    if (!formData.name.trim() || !formData.description.trim() || !formData.teamId || !formData.type) {
+    if (!formData.name.trim() || !formData.description.trim() || !formData.teamId) {
       toast.error(t('toast.fillAllFields'));
       return;
     }
 
     try {
-      await createTask(formData);
+      // Use default type 'file' for backend compatibility
+      await createTask({ ...formData, type: 'file' });
       setCreateDialogOpen(false);
-      setFormData({ name: '', description: '', teamId: '', type: 'file' });
+      setFormData({ name: '', description: '', teamId: '' });
       toast.success(t('toast.taskCreated'));
     } catch (error) {
       toast.error(t('toast.taskCreateFailed', { error: String(error) }));
@@ -550,17 +546,6 @@ export function Tasks() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="task-type">{t('createDialog.typeLabel')}</Label>
-              <Select
-                id="task-type"
-                value={formData.type}
-                onChange={(e) => setFormData(prev => ({ ...prev, type: e.target.value as TaskType }))}
-              >
-                <option value="file">{t('taskTypes.file')}</option>
-                <option value="app">{t('taskTypes.app')}</option>
-              </Select>
-            </div>
-            <div className="space-y-2">
               <Label htmlFor="task-team">{t('createDialog.teamLabel')}</Label>
               {teams.length === 0 ? (
                 <div className="text-sm text-muted-foreground py-2">
@@ -572,9 +557,9 @@ export function Tasks() {
                   value={formData.teamId}
                   onChange={(e) => setFormData(prev => ({ ...prev, teamId: e.target.value }))}
                 >
-                  <option value="">{t('createDialog.teamPlaceholder')}</option>
+                  <option value="" className="bg-background text-foreground">{t('createDialog.teamPlaceholder')}</option>
                   {teams.map(team => (
-                    <option key={team.id} value={team.id}>
+                    <option key={team.id} value={team.id} className="bg-background text-foreground">
                       {team.name}
                     </option>
                   ))}
@@ -583,7 +568,7 @@ export function Tasks() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setCreateDialogOpen(false); setFormData({ name: '', description: '', teamId: '', type: 'file' }); }}>
+            <Button variant="outline" onClick={() => { setCreateDialogOpen(false); setFormData({ name: '', description: '', teamId: '' }); }}>
               {t('common:actions.cancel')}
             </Button>
             <Button onClick={handleCreateTask} disabled={teams.length === 0}>
@@ -691,15 +676,6 @@ export function Tasks() {
               <Input
                 id="task-team-readonly"
                 value={teams.find(t => t.id === reExecuteTask?.teamId)?.name || ''}
-                disabled
-                className="bg-muted"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="task-type-readonly">{t('createDialog.typeLabel')}</Label>
-              <Input
-                id="task-type-readonly"
-                value={reExecuteTask?.type ? t(`taskTypes.${reExecuteTask.type}`) : ''}
                 disabled
                 className="bg-muted"
               />

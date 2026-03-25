@@ -1,0 +1,10 @@
+{
+  "id": "snake-game",
+  "name": "贪吃蛇",
+  "version": "1.0.0",
+  "description": "经典贪吃蛇游戏",
+  "author": "ClawX Team",
+  "icon": "🐍",
+  "type": "component",
+  "entry": "index.js"
+}

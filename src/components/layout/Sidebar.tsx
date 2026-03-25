@@ -9,22 +9,28 @@ import {
   Network,
   Bot,
   Puzzle,
-  Clock,
+  // Clock,
   Settings as SettingsIcon,
   PanelLeftClose,
   PanelLeft,
+  // Plus,
   Terminal,
   ExternalLink,
   Trash2,
   Cpu,
   Users,
   ListTodo,
+  Package,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { useChatStore } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
+import { useTasksStore } from '@/stores/tasks';
+import { useAppsStore } from '@/stores/apps';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -108,9 +114,47 @@ function getSessionBucket(activityMs: number, nowMs: number): SessionBucketKey {
 const INITIAL_NOW_MS = Date.now();
 
 function getAgentIdFromSessionKey(sessionKey: string): string {
+  // Handle task session format: session-{taskId}
+  if (sessionKey.startsWith('session-')) {
+    // Return 'task' as a placeholder, we'll get actual agent from task data
+    return 'task';
+  }
+  // Handle agent session format: agent:{agentId}:{sessionId}
   if (!sessionKey.startsWith('agent:')) return 'main';
   const [, agentId] = sessionKey.split(':');
   return agentId || 'main';
+}
+
+function getSessionDisplayInfo(sessionKey: string, tasks: Array<{ id: string; name: string; teamId: string; executionState?: { nodeResults: Record<string, { agentId?: string }> } }>, agentNameById: Record<string, string>): { agentName: string; sessionLabel: string } {
+  // Handle task session format: session-{taskId}
+  if (sessionKey.startsWith('session-')) {
+    const taskId = sessionKey.substring('session-'.length);
+    const task = tasks.find(t => t.id === taskId);
+
+    if (task) {
+      // Try to get agent from execution state
+      const nodeResults = task.executionState?.nodeResults || {};
+      const firstAgentId = Object.values(nodeResults).find(r => r.agentId)?.agentId;
+      const agentName = firstAgentId ? (agentNameById[firstAgentId] || firstAgentId) : 'Unknown';
+      return {
+        agentName,
+        sessionLabel: taskId,
+      };
+    }
+
+    return {
+      agentName: 'Unknown',
+      sessionLabel: taskId,
+    };
+  }
+
+  // Handle agent session format: agent:{agentId}:{sessionId}
+  const agentId = getAgentIdFromSessionKey(sessionKey);
+  const agentName = agentNameById[agentId] || agentId;
+  return {
+    agentName,
+    sessionLabel: '',
+  };
 }
 
 export function Sidebar() {
@@ -144,9 +188,13 @@ export function Sidebar() {
   }, [isGatewayRunning, loadHistory, loadSessions]);
   const agents = useAgentsStore((s) => s.agents);
   const fetchAgents = useAgentsStore((s) => s.fetchAgents);
+  const tasks = useTasksStore((s) => s.tasks);
+  const apps = useAppsStore((s) => s.apps);
+  const fetchApps = useAppsStore((s) => s.fetchApps);
 
   const navigate = useNavigate();
-  const isOnChat = useLocation().pathname === '/';
+  const location = useLocation();
+  const isOnChat = location.pathname === '/';
 
   const getSessionLabel = (key: string, displayName?: string, label?: string) =>
     sessionLabels[key] ?? label ?? displayName ?? key;
@@ -171,6 +219,7 @@ export function Sidebar() {
   const { t } = useTranslation(['common', 'chat']);
   const [sessionToDelete, setSessionToDelete] = useState<{ key: string; label: string } | null>(null);
   const [nowMs, setNowMs] = useState(INITIAL_NOW_MS);
+  const [appsExpanded, setAppsExpanded] = useState(true); // Apps menu expansion state
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -183,14 +232,27 @@ export function Sidebar() {
     void fetchAgents();
   }, [fetchAgents]);
 
+  useEffect(() => {
+    void fetchApps();
+  }, [fetchApps]);
+
   const agentNameById = useMemo(
-    () => Object.fromEntries(agents.map((agent) => [agent.id, agent.name])),
+    () => Object.fromEntries((agents ?? []).map((agent) => [agent.id, agent.name])),
     [agents],
   );
 
-  const getAgentDisplayName = (agentId: string): string => {
-    return agentNameById[agentId] || agentId;
-  };
+  // Get enabled apps for display
+  const enabledApps = useMemo(
+    () => Object.entries(apps)
+      .filter(([, app]) => app.enabled)
+      .map(([id, app]) => ({ id, ...app }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [apps],
+  );
+
+  // const getAgentDisplayName = (agentId: string): string => {
+  //   return agentNameById[agentId] || agentId;
+  // };
   const sessionBuckets: Array<{ key: SessionBucketKey; label: string; sessions: typeof sessions }> = [
     { key: 'today', label: t('chat:historyBuckets.today'), sessions: [] },
     { key: 'yesterday', label: t('chat:historyBuckets.yesterday'), sessions: [] },
@@ -215,10 +277,11 @@ export function Sidebar() {
     { to: '/agents', icon: <Bot className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.agents'), category: 'workspace' },
     { to: '/teams', icon: <Users className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.teams'), category: 'workspace' },
     { to: '/tasks', icon: <ListTodo className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.tasks'), category: 'workspace' },
+    { to: '/apps', icon: <Package className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.apps'), category: 'workspace' },
     { to: '/models', icon: <Cpu className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.models'), category: 'system' },
     { to: '/channels', icon: <Network className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.channels'), category: 'system' },
     { to: '/skills', icon: <Puzzle className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.skills'), category: 'system' },
-    { to: '/cron', icon: <Clock className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.cronTasks'), category: 'system' },
+    // { to: '/cron', icon: <Clock className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.cronTasks'), category: 'system' },
   ];
 
   const workspaceItems = navItems.filter(item => item.category === 'workspace');
@@ -257,14 +320,13 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex flex-col px-2 gap-0.5">
-
         {/* 工作空间分类 */}
         {!sidebarCollapsed && (
           <div className="px-2.5 pt-2 pb-1 text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-wide">
             {t('sidebar.categoryWorkspace')}
           </div>
         )}
-        {workspaceItems.map((item) => (
+        {workspaceItems.filter(item => item.to !== '/apps').map((item) => (
           <NavItem
             key={item.to}
             to={item.to}
@@ -274,6 +336,81 @@ export function Sidebar() {
             indented={!sidebarCollapsed}
           />
         ))}
+
+        {/* Apps Menu with expand/collapse toggle */}
+        {!sidebarCollapsed ? (
+          <div className="relative">
+            <NavLink
+              to="/apps"
+              className={({ isActive }) =>
+                cn(
+                  'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[14px] font-medium transition-colors',
+                  'hover:bg-black/5 dark:hover:bg-white/5 text-foreground/80',
+                  isActive
+                    ? 'bg-black/5 dark:bg-white/10 text-foreground'
+                    : '',
+                  'ml-4'
+                )
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <div className={cn("flex shrink-0 items-center justify-center", isActive ? "text-foreground" : "text-muted-foreground")}>
+                    <Package className="h-[18px] w-[18px]" strokeWidth={2} />
+                  </div>
+                  <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{t('sidebar.apps')}</span>
+                  {/* Expand/collapse button */}
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setAppsExpanded(!appsExpanded);
+                    }}
+                    className="flex items-center justify-center p-0.5 hover:bg-black/5 dark:hover:bg-white/10 rounded transition-colors"
+                  >
+                    {appsExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </button>
+                </>
+              )}
+            </NavLink>
+          </div>
+        ) : (
+          <NavItem
+            to="/apps"
+            icon={<Package className="h-[18px] w-[18px]" strokeWidth={2} />}
+            label={t('sidebar.apps')}
+            collapsed={sidebarCollapsed}
+            indented={false}
+          />
+        )}
+
+        {/* Installed Apps - sub menu (shown when expanded) */}
+        {!sidebarCollapsed && appsExpanded && enabledApps.length > 0 && (
+          <div className="ml-9 mt-0.5 space-y-0.5">
+            {enabledApps.map((app) => (
+              <button
+                key={app.id}
+                onClick={() => navigate(`/apps/${app.id}`)}
+                className={cn(
+                  'w-full text-left rounded-lg px-2.5 py-1.5 text-[13px] transition-colors',
+                  'hover:bg-black/5 dark:hover:bg-white/5',
+                  location.pathname === `/apps/${app.id}`
+                    ? 'bg-black/5 dark:bg-white/10 text-foreground font-medium'
+                    : 'text-foreground/75',
+                )}
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="text-sm shrink-0">{app.icon || '📦'}</span>
+                  <span className="truncate">{app.name}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* 系统设置分类 */}
         {!sidebarCollapsed && (
@@ -303,8 +440,7 @@ export function Sidebar() {
                   {bucket.label}
                 </div>
                 {bucket.sessions.map((s) => {
-                  const agentId = getAgentIdFromSessionKey(s.key);
-                  const agentName = getAgentDisplayName(agentId);
+                  const displayInfo = getSessionDisplayInfo(s.key, tasks, agentNameById);
                   return (
                     <div key={s.key} className="group relative flex items-center">
                       <button
@@ -319,9 +455,13 @@ export function Sidebar() {
                       >
                         <div className="flex min-w-0 items-center gap-2">
                           <span className="shrink-0 rounded-full bg-black/[0.04] px-2 py-0.5 text-[10px] font-medium text-foreground/70 dark:bg-white/[0.08]">
-                            {agentName}
+                            {displayInfo.agentName}
                           </span>
-                          {/*<span className="truncate">{getSessionLabel(s.key, s.displayName, s.label)}</span>*/}
+                          {displayInfo.sessionLabel && (
+                            <span className="truncate text-[11px] text-foreground/60">
+                              {displayInfo.sessionLabel}
+                            </span>
+                          )}
                         </div>
                       </button>
                       <button

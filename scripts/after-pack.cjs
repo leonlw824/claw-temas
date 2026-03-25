@@ -162,7 +162,7 @@ const MODULE_PATCHES = {
 };
 
 function patchBrokenModules(nodeModulesDir) {
-  const { writeFileSync } = require('fs');
+  const { writeFileSync, readFileSync } = require('fs');
   let count = 0;
   for (const [rel, content] of Object.entries(MODULE_PATCHES)) {
     const target = join(nodeModulesDir, rel);
@@ -171,8 +171,105 @@ function patchBrokenModules(nodeModulesDir) {
       count++;
     }
   }
+
+  // https-proxy-agent: add a CJS `require` condition only when we can point to
+  // a real CommonJS entry. Mapping `require` to an ESM file can cause
+  // ERR_REQUIRE_CYCLE_MODULE in Node.js CLI/TUI flows.
+  const hpaPkgPath = join(nodeModulesDir, 'https-proxy-agent', 'package.json');
+  if (existsSync(hpaPkgPath)) {
+    try {
+      const { existsSync: fsExistsSync } = require('fs');
+      const raw = readFileSync(hpaPkgPath, 'utf8');
+      const pkg = JSON.parse(raw);
+      const exp = pkg.exports;
+      const hasRequireCondition = Boolean(
+        (exp && typeof exp === 'object' && exp.require) ||
+        (exp && typeof exp === 'object' && exp['.'] && exp['.'].require)
+      );
+
+      const pkgDir = dirname(hpaPkgPath);
+      const mainEntry = typeof pkg.main === 'string' ? pkg.main : null;
+      const dotImport = exp && typeof exp === 'object' && exp['.'] && typeof exp['.'].import === 'string'
+        ? exp['.'].import
+        : null;
+      const rootImport = exp && typeof exp === 'object' && typeof exp.import === 'string'
+        ? exp.import
+        : null;
+      const importEntry = dotImport || rootImport;
+
+      const cjsCandidates = [
+        mainEntry,
+        importEntry && importEntry.endsWith('.js') ? importEntry.replace(/\.js$/, '.cjs') : null,
+        './dist/index.cjs',
+      ].filter(Boolean);
+
+      const requireTarget = cjsCandidates.find((candidate) =>
+        fsExistsSync(join(pkgDir, candidate)),
+      );
+
+      // Only patch if exports exists, lacks a CJS `require` condition, and we
+      // have a verified CJS target file.
+      if (exp && !hasRequireCondition && requireTarget) {
+        pkg.exports = {
+          '.': {
+            import: importEntry || requireTarget,
+            require: requireTarget,
+            default: importEntry || requireTarget,
+          },
+        };
+        writeFileSync(hpaPkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
+        count++;
+        console.log(`[after-pack] 🩹 Patched https-proxy-agent exports for CJS compatibility (require=${requireTarget})`);
+      }
+    } catch (err) {
+      console.warn('[after-pack] ⚠️  Failed to patch https-proxy-agent:', err.message);
+    }
+  }
+
   if (count > 0) {
     console.log(`[after-pack] 🩹 Patched ${count} broken module(s) in ${nodeModulesDir}`);
+  }
+}
+
+// ── Plugin ID mismatch patcher ───────────────────────────────────────────────
+// Some plugins (e.g. wecom) have a compiled JS entry that hardcodes a different
+// ID than what openclaw.plugin.json declares.  The Gateway rejects mismatches,
+// so we fix them after copying.
+
+const PLUGIN_ID_FIXES = {
+  'wecom-openclaw-plugin': 'wecom',
+};
+
+function patchPluginIds(pluginDir, expectedId) {
+  const { readFileSync, writeFileSync } = require('fs');
+
+  const pkgJsonPath = join(pluginDir, 'package.json');
+  if (!existsSync(pkgJsonPath)) return;
+
+  const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf8'));
+  const entryFiles = [pkg.main, pkg.module].filter(Boolean);
+
+  for (const entry of entryFiles) {
+    const entryPath = join(pluginDir, entry);
+    if (!existsSync(entryPath)) continue;
+
+    let content = readFileSync(entryPath, 'utf8');
+    let patched = false;
+
+    for (const [wrongId, correctId] of Object.entries(PLUGIN_ID_FIXES)) {
+      if (correctId !== expectedId) continue;
+      const pattern = new RegExp(`(\\bid\\s*:\\s*)(["'])${wrongId.replace(/-/g, '\\-')}\\2`, 'g');
+      const replaced = content.replace(pattern, `$1$2${correctId}$2`);
+      if (replaced !== content) {
+        content = replaced;
+        patched = true;
+        console.log(`[after-pack] 🩹 Patching plugin ID in ${entry}: "${wrongId}" → "${correctId}"`);
+      }
+    }
+
+    if (patched) {
+      writeFileSync(entryPath, content, 'utf8');
+    }
   }
 }
 
@@ -221,7 +318,7 @@ function bundlePlugin(nodeModulesRoot, npmName, destDir) {
   }
 
   let realPluginPath;
-  try { realPluginPath = realpathSync(normWin(pkgPath)); } catch { realPluginPath = pkgPath; }
+  try { realPluginPath = realpathSync(pkgPath); } catch { realPluginPath = pkgPath; }
 
   // Copy plugin package itself
   if (existsSync(normWin(destDir))) rmSync(normWin(destDir), { recursive: true, force: true });
@@ -258,7 +355,7 @@ function bundlePlugin(nodeModulesRoot, npmName, destDir) {
       if (name === skipPkg) continue;
       if (SKIP_PACKAGES.has(name) || SKIP_SCOPES.some(s => name.startsWith(s))) continue;
       let rp;
-      try { rp = realpathSync(normWin(fullPath)); } catch { continue; }
+      try { rp = realpathSync(fullPath); } catch { continue; }
       if (collected.has(rp)) continue;
       collected.set(rp, name);
       const depVirtualNM = getVirtualStoreNodeModules(rp);
@@ -340,6 +437,7 @@ exports.default = async function afterPack(context) {
     { npmName: '@soimy/dingtalk', pluginId: 'dingtalk' },
     { npmName: '@wecom/wecom-openclaw-plugin', pluginId: 'wecom' },
     { npmName: '@sliverp/qqbot', pluginId: 'qqbot' },
+    { npmName: '@larksuite/openclaw-lark', pluginId: 'feishu-openclaw-plugin' },
   ];
 
   mkdirSync(pluginsDestRoot, { recursive: true });
@@ -354,6 +452,8 @@ exports.default = async function afterPack(context) {
         cleanupKoffi(pluginNM, platform, arch);
         cleanupNativePlatformPackages(pluginNM, platform, arch);
       }
+      // Fix hardcoded plugin ID mismatches in compiled JS
+      patchPluginIds(pluginDestDir, pluginId);
     }
   }
 

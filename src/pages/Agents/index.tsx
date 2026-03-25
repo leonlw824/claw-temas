@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Bot, Check, MessageCircle, Plus, RefreshCw, Settings2, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,15 +7,12 @@ import { Select } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { StatusBadge } from '@/components/common/StatusBadge';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
-import { ChannelConfigModal } from '@/components/channels/ChannelConfigModal';
-import { Textarea } from '@/components/ui/textarea';
 import { useAgentsStore } from '@/stores/agents';
-import { useChannelsStore } from '@/stores/channels';
 import { useGatewayStore } from '@/stores/gateway';
+import { hostApiFetch } from '@/lib/host-api';
+import { subscribeHostEvent } from '@/lib/host-events';
 import { useChatStore } from '@/stores/chat';
-import { useProviderStore } from '@/stores/providers';
 import { useNavigate } from 'react-router-dom';
 import { CHANNEL_ICONS, CHANNEL_NAMES, type ChannelType } from '@/types/channel';
 import type { AgentSummary } from '@/types/agent';
@@ -30,9 +27,27 @@ import feishuIcon from '@/assets/channels/feishu.svg';
 import wecomIcon from '@/assets/channels/wecom.svg';
 import qqIcon from '@/assets/channels/qq.svg';
 
+interface ChannelAccountItem {
+  accountId: string;
+  name: string;
+  configured: boolean;
+  status: 'connected' | 'connecting' | 'disconnected' | 'error';
+  lastError?: string;
+  isDefault: boolean;
+  agentId?: string;
+}
+
+interface ChannelGroupItem {
+  channelType: string;
+  defaultAccountId: string;
+  status: 'connected' | 'connecting' | 'disconnected' | 'error';
+  accounts: ChannelAccountItem[];
+}
+
 export function Agents() {
   const { t } = useTranslation('agents');
   const gatewayStatus = useGatewayStore((state) => state.status);
+  const lastGatewayStateRef = useRef(gatewayStatus.state);
   const navigate = useNavigate();
   const {
     agents,
@@ -42,22 +57,54 @@ export function Agents() {
     createAgent,
     deleteAgent,
   } = useAgentsStore();
-  const { channels, fetchChannels } = useChannelsStore();
+  const [channelGroups, setChannelGroups] = useState<ChannelGroupItem[]>([]);
   const { switchSession, getSessionForAgent, newSessionForAgent } = useChatStore();
 
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
   const [agentToDelete, setAgentToDelete] = useState<AgentSummary | null>(null);
 
+  const fetchChannelAccounts = useCallback(async () => {
+    try {
+      const response = await hostApiFetch<{ success: boolean; channels?: ChannelGroupItem[] }>('/api/channels/accounts');
+      setChannelGroups(response.channels || []);
+    } catch {
+      setChannelGroups([]);
+    }
+  }, []);
+
   useEffect(() => {
-    void Promise.all([fetchAgents(), fetchChannels()]);
-  }, [fetchAgents, fetchChannels]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void Promise.all([fetchAgents(), fetchChannelAccounts()]);
+  }, [fetchAgents, fetchChannelAccounts]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeHostEvent('gateway:channel-status', () => {
+      void fetchChannelAccounts();
+    });
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    };
+  }, [fetchChannelAccounts]);
+
+  useEffect(() => {
+    const previousGatewayState = lastGatewayStateRef.current;
+    lastGatewayStateRef.current = gatewayStatus.state;
+
+    if (previousGatewayState !== 'running' && gatewayStatus.state === 'running') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void fetchChannelAccounts();
+    }
+  }, [fetchChannelAccounts, gatewayStatus.state]);
+
   const activeAgent = useMemo(
     () => agents.find((agent) => agent.id === activeAgentId) ?? null,
     [activeAgentId, agents],
   );
   const handleRefresh = () => {
-    void Promise.all([fetchAgents(), fetchChannels()]);
+    void Promise.all([fetchAgents(), fetchChannelAccounts()]);
   };
 
   if (loading) {
@@ -79,6 +126,7 @@ export function Agents() {
             >
               {t('pageTitle')}
             </h1>
+            <p className="text-[17px] text-foreground/70 font-medium">{t('subtitle')}</p>
           </div>
           <div className="flex items-center gap-3 md:mt-2">
             <Button
@@ -123,6 +171,7 @@ export function Agents() {
               <AgentCard
                 key={agent.id}
                 agent={agent}
+                channelGroups={channelGroups}
                 onOpenSettings={() => setActiveAgentId(agent.id)}
                 onDelete={() => setAgentToDelete(agent)}
                 onChat={() => {
@@ -159,7 +208,7 @@ export function Agents() {
       {activeAgent && (
         <AgentSettingsModal
           agent={activeAgent}
-          channels={channels}
+          channelGroups={channelGroups}
           onClose={() => setActiveAgentId(null)}
         />
       )}
@@ -173,12 +222,17 @@ export function Agents() {
         variant="destructive"
         onConfirm={async () => {
           if (!agentToDelete) return;
-          await deleteAgent(agentToDelete.id);
-          setAgentToDelete(null);
-          if (activeAgentId === agentToDelete.id) {
-            setActiveAgentId(null);
+          try {
+            await deleteAgent(agentToDelete.id);
+            const deletedId = agentToDelete.id;
+            setAgentToDelete(null);
+            if (activeAgentId === deletedId) {
+              setActiveAgentId(null);
+            }
+            toast.success(t('toast.agentDeleted'));
+          } catch (error) {
+            toast.error(t('toast.agentDeleteFailed', { error: String(error) }));
           }
-          toast.success(t('toast.agentDeleted'));
         }}
         onCancel={() => setAgentToDelete(null)}
       />
@@ -188,18 +242,32 @@ export function Agents() {
 
 function AgentCard({
   agent,
+  channelGroups,
   onOpenSettings,
   onDelete,
   onChat,
 }: {
   agent: AgentSummary;
+  channelGroups: ChannelGroupItem[];
   onOpenSettings: () => void;
   onDelete: () => void;
   onChat: () => void;
 }) {
   const { t } = useTranslation('agents');
-  const channelsText = agent.channelTypes.length > 0
-    ? agent.channelTypes.map((channelType) => CHANNEL_NAMES[channelType as ChannelType] || channelType).join(', ')
+  const boundChannelAccounts = channelGroups.flatMap((group) =>
+    group.accounts
+      .filter((account) => account.agentId === agent.id)
+      .map((account) => {
+        const channelName = CHANNEL_NAMES[group.channelType as ChannelType] || group.channelType;
+        const accountLabel =
+          account.accountId === 'default'
+            ? t('settingsDialog.mainAccount')
+            : account.name || account.accountId;
+        return `${channelName} · ${accountLabel}`;
+      }),
+  );
+  const channelsText = boundChannelAccounts.length > 0
+    ? boundChannelAccounts.join(', ')
     : t('none');
 
   return (
@@ -285,7 +353,7 @@ function AgentCard({
   );
 }
 
-const inputClasses = 'h-[44px] rounded-xl font-mono text-[13px] bg-[#eeece3] dark:bg-[#151514] border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40';
+const inputClasses = 'h-[44px] rounded-xl font-mono text-[13px] bg-[#eeece3] dark:bg-muted border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40';
 const labelClasses = 'text-[14px] text-foreground/80 font-bold';
 
 function ChannelLogo({ type }: { type: ChannelType }) {
@@ -335,7 +403,7 @@ function AddAgentDialog({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-md rounded-3xl border-0 shadow-2xl bg-[#f3f1e9] dark:bg-[#1a1a19] overflow-hidden">
+      <Card className="w-full max-w-md rounded-3xl border-0 shadow-2xl bg-[#f3f1e9] dark:bg-card overflow-hidden">
         <CardHeader className="pb-2">
           <CardTitle className="text-2xl font-serif font-normal tracking-tight">
             {t('createDialog.title')}
@@ -386,98 +454,85 @@ function AddAgentDialog({
 
 function AgentSettingsModal({
   agent,
-  channels,
+  channelGroups,
   onClose,
 }: {
   agent: AgentSummary;
-  channels: Array<{ type: string; name: string; status: 'connected' | 'connecting' | 'disconnected' | 'error'; error?: string }>;
+  channelGroups: ChannelGroupItem[];
   onClose: () => void;
 }) {
   const { t } = useTranslation('agents');
-  const { updateAgent, updateAgentModel, assignChannel, removeChannel, readSoul, writeSoul, readBehavior, writeBehavior } = useAgentsStore();
-  const { fetchChannels } = useChannelsStore();
-  const { accounts, fetchProviders } = useProviderStore();
+  const { updateAgent, updateAgentModel } = useAgentsStore();
   const [name, setName] = useState(agent.name);
+  const [savingName, setSavingName] = useState(false);
   const [model, setModel] = useState(agent.model || '');
-  const [soulContent, setSoulContent] = useState('');
-  const [behaviorContent, setBehaviorContent] = useState('');
-  const [loadingSoul, setLoadingSoul] = useState(false);
-  const [loadingBehavior, setLoadingBehavior] = useState(false);
-  const [showChannelModal, setShowChannelModal] = useState(false);
-  const [channelToRemove, setChannelToRemove] = useState<ChannelType | null>(null);
 
   useEffect(() => {
     setName(agent.name);
     setModel(agent.model || '');
   }, [agent.name, agent.model]);
 
-  useEffect(() => {
-    void fetchProviders();
-  }, [fetchProviders]);
+  // 获取所有可用的模型（用于模型选择）
+  // 直接使用 agent.models（从 models.json 读取）
+  const availableModels = useMemo(() => {
+    if (!agent.models || agent.models.length === 0) {
+      return [];
+    }
 
-  // 获取所有可用的账户（用于模型选择）
-  const availableAccounts = useMemo(() => {
-    // 过滤出已启用且有模型的账户
-    return accounts
-      .filter(account => account.enabled && account.model)
-      .sort((a, b) => {
-        // 默认账户排在前面
-        if (a.isDefault && !b.isDefault) return -1;
-        if (!a.isDefault && b.isDefault) return 1;
-        // 其他按标签排序
-        return a.label.localeCompare(b.label);
+    // agent.models 格式为 ["providerId/modelId", ...]
+    const models = agent.models.map(modelId => {
+      const [providerId, ...modelParts] = modelId.split('/');
+      const modelName = modelParts.join('/');
+      return {
+        value: modelId,
+        label: `${providerId} - ${modelName}`,
+      };
+    });
+
+    // 确保当前 agent.model 存在于选项列表中
+    // 如果当前模型不在列表中（例如继承自 defaults），添加它
+    if (agent.model && !models.some(m => m.value === agent.model)) {
+      const [providerId, ...modelParts] = agent.model.split('/');
+      const modelName = modelParts.join('/');
+      models.unshift({
+        value: agent.model,
+        label: `${providerId} - ${modelName} (inherited)`,
       });
-  }, [accounts]);
+    }
 
-  useEffect(() => {
-    // Load SOUL.md content
-    setLoadingSoul(true);
-    readSoul(agent.id).then((content) => {
-      setSoulContent(content);
-      setLoadingSoul(false);
-    }).catch(() => {
-      setLoadingSoul(false);
-    });
+    return models;
+  }, [agent.models, agent.model]);
 
-    // Load AGENTS.md content
-    setLoadingBehavior(true);
-    readBehavior(agent.id).then((content) => {
-      setBehaviorContent(content);
-      setLoadingBehavior(false);
-    }).catch(() => {
-      setLoadingBehavior(false);
-    });
-  }, [agent.id, readSoul, readBehavior]);
-
-  const runtimeChannelsByType = useMemo(
-    () => Object.fromEntries(channels.map((channel) => [channel.type, channel])),
-    [channels],
-  );
-
-  const handleChannelSaved = async (channelType: ChannelType) => {
+  const handleSaveName = async () => {
+    if (!name.trim() || name.trim() === agent.name) return;
+    setSavingName(true);
     try {
-      await assignChannel(agent.id, channelType);
-      await fetchChannels();
-      toast.success(t('toast.channelAssigned', { channel: CHANNEL_NAMES[channelType] || channelType }));
+      await updateAgent(agent.id, name.trim());
+      toast.success(t('toast.agentUpdated'));
     } catch (error) {
-      toast.error(t('toast.channelAssignFailed', { error: String(error) }));
-      throw error;
+      toast.error(t('toast.agentUpdateFailed', { error: String(error) }));
+    } finally {
+      setSavingName(false);
     }
   };
 
-  const assignedChannels = agent.channelTypes.map((channelType) => {
-    const runtimeChannel = runtimeChannelsByType[channelType];
-    return {
-      channelType: channelType as ChannelType,
-      name: runtimeChannel?.name || CHANNEL_NAMES[channelType as ChannelType] || channelType,
-      status: runtimeChannel?.status || 'disconnected',
-      error: runtimeChannel?.error,
-    };
-  });
+  const assignedChannels = channelGroups.flatMap((group) =>
+    group.accounts
+      .filter((account) => account.agentId === agent.id)
+      .map((account) => ({
+        channelType: group.channelType as ChannelType,
+        accountId: account.accountId,
+        name:
+          account.accountId === 'default'
+            ? t('settingsDialog.mainAccount')
+            : account.name || account.accountId,
+        error: account.lastError,
+      })),
+  );
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-3xl border-0 shadow-2xl bg-[#f3f1e9] dark:bg-[#1a1a19] overflow-hidden">
+      <Card className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-3xl border-0 shadow-2xl bg-[#f3f1e9] dark:bg-card overflow-hidden">
         <CardHeader className="flex flex-row items-start justify-between pb-2 shrink-0">
           <div>
             <CardTitle className="text-2xl font-serif font-normal tracking-tight">
@@ -501,209 +556,137 @@ function AgentSettingsModal({
           <div className="space-y-4">
             <div className="space-y-2.5">
               <Label htmlFor="agent-settings-name" className={labelClasses}>{t('settingsDialog.nameLabel')}</Label>
-              <Input
-                id="agent-settings-name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                onBlur={() => {
-                  if (name.trim() && name.trim() !== agent.name) {
-                    void updateAgent(agent.id, name.trim()).then(() => {
-                      toast.success(t('toast.agentUpdated'));
-                    }).catch((error) => {
-                      toast.error(t('toast.agentUpdateFailed', { error: String(error) }));
-                    });
-                  }
-                }}
-                className={inputClasses}
-              />
-            </div>
-
-            {/* Agent ID and Model */}
-            <div className="grid gap-4 md:grid-cols-2">
-              {/* Agent ID - Read only */}
-              <div className="space-y-1 rounded-2xl bg-black/5 dark:bg-white/5 border border-transparent p-4">
-                <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground/80 font-medium">
-                  {t('settingsDialog.agentIdLabel')}
-                </p>
-                <p className="font-mono text-[13px] text-foreground">{agent.id}</p>
-              </div>
-
-              {/* Model - Editable */}
-              <div className="space-y-2.5">
-                <Label htmlFor="agent-model" className={labelClasses}>
-                  {t('settingsDialog.modelLabel')}
-                </Label>
-                <Select
-                  id="agent-model"
-                  value={model}
-                  onChange={(event) => {
-                    const newModel = event.target.value;
-                    setModel(newModel);
-                    if (newModel) {
-                      void updateAgentModel(agent.id, newModel).then(() => {
+              <div className="flex gap-2">
+                <Input
+                  id="agent-settings-name"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  readOnly={agent.isDefault}
+                  onBlur={() => {
+                    if (name.trim() && name.trim() !== agent.name) {
+                      void updateAgent(agent.id, name.trim()).then(() => {
                         toast.success(t('toast.agentUpdated'));
                       }).catch((error) => {
                         toast.error(t('toast.agentUpdateFailed', { error: String(error) }));
                       });
                     }
                   }}
-                  className="h-[44px] rounded-xl font-mono text-[13px] bg-[#eeece3] dark:bg-[#151514] border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground"
-                >
-                  {availableAccounts.length === 0 ? (
-                    <option value={model || ''}>{agent.modelDisplay}</option>
-                  ) : (
-                    availableAccounts.map((account) => (
-                      <option key={account.id} value={`${account.id}/${account.model}`}>
-                        {account.label}
-                      </option>
-                    ))
-                  )}
-                </Select>
+                  className={inputClasses}
+                />
+                {!agent.isDefault && (
+                  <Button
+                    variant="outline"
+                    onClick={() => void handleSaveName()}
+                    disabled={savingName || !name.trim() || name.trim() === agent.name}
+                    className="h-[44px] text-[13px] font-medium rounded-xl px-4 border-black/10 dark:border-white/10 bg-[#eeece3] dark:bg-muted hover:bg-black/5 dark:hover:bg-white/5 shadow-none text-foreground/80 hover:text-foreground"
+                  >
+                    {savingName ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                    ) : (
+                      t('common:actions.save')
+                    )}
+                  </Button>
+                )}
               </div>
             </div>
-          </div>
 
-          {/* Personal Introduction (SOUL.md) */}
-          <div className="space-y-2.5">
-            <Label htmlFor="agent-soul" className={labelClasses}>{t('settingsDialog.soulLabel')}</Label>
-            <p className="text-[13px] text-foreground/60">{t('settingsDialog.soulDescription')}</p>
-            <Textarea
-              id="agent-soul"
-              value={soulContent}
-              onChange={(event) => setSoulContent(event.target.value)}
-              onBlur={() => {
-                if (soulContent) {
-                  void writeSoul(agent.id, soulContent).then(() => {
-                    toast.success(t('toast.agentUpdated'));
-                  }).catch((error) => {
-                    toast.error(t('toast.agentUpdateFailed', { error: String(error) }));
-                  });
-                }
-              }}
-              placeholder={loadingSoul ? 'Loading...' : t('settingsDialog.soulPlaceholder')}
-              disabled={loadingSoul}
-              rows={6}
-              className="font-mono text-[13px] bg-[#eeece3] dark:bg-[#151514] border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40 rounded-xl resize-none"
-            />
-          </div>
-
-          {/* Behavior Guidelines (AGENTS.md) */}
-          <div className="space-y-2.5">
-            <Label htmlFor="agent-behavior" className={labelClasses}>{t('settingsDialog.behaviorLabel')}</Label>
-            <p className="text-[13px] text-foreground/60">{t('settingsDialog.behaviorDescription')}</p>
-            <Textarea
-              id="agent-behavior"
-              value={behaviorContent}
-              onChange={(event) => setBehaviorContent(event.target.value)}
-              onBlur={() => {
-                if (behaviorContent) {
-                  void writeBehavior(agent.id, behaviorContent).then(() => {
-                    toast.success(t('toast.agentUpdated'));
-                  }).catch((error) => {
-                    toast.error(t('toast.agentUpdateFailed', { error: String(error) }));
-                  });
-                }
-              }}
-              placeholder={loadingBehavior ? 'Loading...' : t('settingsDialog.behaviorPlaceholder')}
-              disabled={loadingBehavior}
-              rows={6}
-              className="font-mono text-[13px] bg-[#eeece3] dark:bg-[#151514] border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40 rounded-xl resize-none"
-            />
-          </div>
-
-          {/* Channels */}
-          <div className="space-y-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-xl font-serif text-foreground font-normal tracking-tight">
-                  {t('settingsDialog.channelsTitle')}
-                </h3>
-                <p className="text-[14px] text-foreground/70 mt-1">{t('settingsDialog.channelsDescription')}</p>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1 rounded-2xl bg-black/5 dark:bg-white/5 border border-transparent p-4">
+                <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground/80 font-medium">
+                  {t('settingsDialog.agentIdLabel')}
+                </p>
+                <p className="font-mono text-[13px] text-foreground">{agent.id}</p>
               </div>
-              <Button
-                onClick={() => setShowChannelModal(true)}
-                className="h-9 text-[13px] font-medium rounded-full px-4 shadow-none"
+              <div className="space-y-1 rounded-2xl bg-black/5 dark:bg-white/5 border border-transparent p-4">
+                <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground/80 font-medium">
+                  {t('settingsDialog.modelLabel')}
+                </p>
+                <p className="text-[13.5px] text-foreground">
+                  {agent.model}
+                </p>
+              </div>
+            </div>
+
+            {/* Model - Editable */}
+            <div className="space-y-2.5">
+              <Label htmlFor="agent-model" className={labelClasses}>
+                {t('settingsDialog.modelLabel')}
+              </Label>
+              <Select
+                id="agent-model"
+                value={model}
+                onChange={(event) => {
+                  const newModel = event.target.value;
+                  setModel(newModel);
+                  if (newModel) {
+                    void updateAgentModel(agent.id, newModel).then(() => {
+                      toast.success(t('toast.agentUpdated'));
+                    }).catch((error) => {
+                      toast.error(t('toast.agentUpdateFailed', { error: String(error) }));
+                    });
+                  }
+                }}
+                className="h-[44px] rounded-xl font-mono text-[13px] bg-[#eeece3] dark:bg-[#151514] border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground"
               >
-                <Plus className="h-3.5 w-3.5 mr-2" />
-                {t('settingsDialog.addChannel')}
-              </Button>
+                {availableModels.length === 0 ? (
+                  <option value={model || ''} className="bg-[#eeece3] dark:bg-[#151514] text-foreground">{agent.modelDisplay}</option>
+                ) : (
+                  availableModels.map((modelItem) => (
+                    <option key={modelItem.value} value={modelItem.value} className="bg-[#eeece3] dark:bg-[#151514] text-foreground">
+                      {modelItem.label}
+                    </option>
+                  ))
+                )}
+              </Select>
             </div>
 
-            {assignedChannels.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 p-4 text-[13.5px] text-muted-foreground">
-                {t('settingsDialog.noChannels')}
+            {/* Channels */}
+            <div className="space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-xl font-serif text-foreground font-normal tracking-tight">
+                    {t('settingsDialog.channelsTitle')}
+                  </h3>
+                  <p className="text-[14px] text-foreground/70 mt-1">{t('settingsDialog.channelsDescription')}</p>
+                </div>
               </div>
-            ) : (
-              <div className="space-y-3">
-                {assignedChannels.map((channel) => (
-                  <div key={channel.channelType} className="flex items-center justify-between rounded-2xl bg-black/5 dark:bg-white/5 border border-transparent p-4">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="h-[40px] w-[40px] shrink-0 flex items-center justify-center text-foreground bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 rounded-full shadow-sm">
-                        <ChannelLogo type={channel.channelType} />
+
+              {assignedChannels.length === 0 && agent.channelTypes.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 p-4 text-[13.5px] text-muted-foreground">
+                  {t('settingsDialog.noChannels')}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {assignedChannels.map((channel) => (
+                    <div key={`${channel.channelType}-${channel.accountId}`} className="flex items-center justify-between rounded-2xl bg-black/5 dark:bg-white/5 border border-transparent p-4">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="h-[40px] w-[40px] shrink-0 flex items-center justify-center text-foreground bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 rounded-full shadow-sm">
+                          <ChannelLogo type={channel.channelType} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[15px] font-semibold text-foreground">{channel.name}</p>
+                          <p className="text-[13.5px] text-muted-foreground">
+                            {CHANNEL_NAMES[channel.channelType]} · {channel.accountId === 'default' ? t('settingsDialog.mainAccount') : channel.accountId}
+                          </p>
+                          {channel.error && (
+                            <p className="text-xs text-destructive mt-1">{channel.error}</p>
+                          )}
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <p className="text-[15px] font-semibold text-foreground">{channel.name}</p>
-                        <p className="text-[13.5px] text-muted-foreground">
-                          {CHANNEL_NAMES[channel.channelType]}
-                        </p>
-                        {channel.error && (
-                          <p className="text-xs text-destructive mt-1">{channel.error}</p>
-                        )}
-                      </div>
+                      <div className="shrink-0" />
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <StatusBadge status={channel.status} />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => setChannelToRemove(channel.channelType)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                  ))}
+                  {assignedChannels.length === 0 && agent.channelTypes.length > 0 && (
+                    <div className="rounded-2xl border border-dashed border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 p-4 text-[13.5px] text-muted-foreground">
+                      {t('settingsDialog.channelsManagedInChannels')}
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
-
-      {showChannelModal && (
-        <ChannelConfigModal
-          configuredTypes={agent.channelTypes}
-          showChannelName={false}
-          allowExistingConfig
-          onClose={() => setShowChannelModal(false)}
-          onChannelSaved={async (channelType) => {
-            await handleChannelSaved(channelType);
-            setShowChannelModal(false);
-          }}
-        />
-      )}
-
-      <ConfirmDialog
-        open={!!channelToRemove}
-        title={t('removeChannelDialog.title')}
-        message={channelToRemove ? t('removeChannelDialog.message', { name: CHANNEL_NAMES[channelToRemove] || channelToRemove }) : ''}
-        confirmLabel={t('common:actions.delete')}
-        cancelLabel={t('common:actions.cancel')}
-        variant="destructive"
-        onConfirm={async () => {
-          if (!channelToRemove) return;
-          try {
-            await removeChannel(agent.id, channelToRemove);
-            await fetchChannels();
-            toast.success(t('toast.channelRemoved', { channel: CHANNEL_NAMES[channelToRemove] || channelToRemove }));
-          } catch (error) {
-            toast.error(t('toast.channelRemoveFailed', { error: String(error) }));
-          } finally {
-            setChannelToRemove(null);
-          }
-        }}
-        onCancel={() => setChannelToRemove(null)}
-      />
     </div>
   );
 }

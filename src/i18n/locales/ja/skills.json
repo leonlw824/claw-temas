@@ -18,7 +18,8 @@
     "searchButton": "検索",
     "actions": {
         "enableVisible": "表示中を一括有効化",
-        "disableVisible": "表示中を一括無効化"
+        "disableVisible": "表示中を一括無効化",
+        "installSkill": "スキルをインストール"
     },
     "noSkills": "スキルが見つかりません",
     "noSkillsSearch": "別の検索語をお試しください",
@@ -48,10 +49,24 @@
         "saveConfig": "設定を保存",
         "configSaved": "設定を保存しました",
         "openManual": "マニュアルを開く",
+        "openActualFolder": "実際のフォルダを開く",
+        "copyPath": "パスをコピー",
+        "pathUnavailable": "パスを取得できません",
         "configurable": "設定可能",
         "uninstall": "アンインストール",
         "enable": "有効化",
         "disable": "無効化"
+    },
+    "source": {
+        "badge": {
+            "bundled": "内蔵",
+            "managed": "管理ディレクトリ",
+            "workspace": "ワークスペース",
+            "extra": "追加ディレクトリ",
+            "agentsPersonal": "個人 .agents",
+            "agentsProject": "プロジェクト .agents",
+            "unknown": "不明なソース"
+        }
     },
     "toast": {
         "enabled": "スキルを有効にしました",
@@ -65,6 +80,9 @@
         "failedInstall": "インストールに失敗しました",
         "failedUninstall": "アンインストールに失敗しました",
         "failedFolderNotFound": "スキルフォルダがまだ存在しません。先にスキルをインストールしてください。",
+        "copiedPath": "パスをコピーしました",
+        "failedCopyPath": "パスのコピーに失敗しました",
+        "failedOpenActualFolder": "スキルの実際のフォルダを開けませんでした",
         "searchTimeoutError": "検索がタイムアウトしました。ClawHub.aiで検索してZIPをダウンロードし、\"{{path}}\" に展開することも可能です",
         "installTimeoutError": "インストールがタイムアウトしました。ClawHub.aiでZIPをダウンロードし、\"{{path}}\" に展開することも可能です",
         "searchRateLimitError": "検索リクエストの制限を超過しました。ClawHub.aiで検索してZIPをダウンロードし、\"{{path}}\" に展開することも可能です",
@@ -79,6 +97,10 @@
     },
     "marketplace": {
         "title": "マーケットプレイス",
+        "installDialogTitle": "スキルをインストール",
+        "installDialogSubtitle": "初期表示は Explore、キーワード入力時は検索します。",
+        "sourceLabel": "ソース",
+        "sourceClawHub": "ClawHub",
         "securityNote": "インストール前にスキルカードをクリックして、ClawHubでドキュメントとセキュリティ情報を確認してください。",
         "manualInstallHint": "ネットワークに問題がありますか？いつでもClawHub.aiからスキルのZIPをダウンロードし、手動で \"{{path}}\" に展開してインストールできます。",
         "searching": "ClawHubを検索中...",

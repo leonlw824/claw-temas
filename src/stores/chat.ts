@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import { hostApiFetch } from '@/lib/host-api';
 import { useGatewayStore } from './gateway';
 import { useAgentsStore } from './agents';
+import { buildCronSessionHistoryPath, isCronSessionKey } from './chat/cron-session-utils';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ export interface ChatSession {
   displayName?: string;
   thinkingLevel?: string;
   model?: string;
+  updatedAt?: number;
 }
 
 export interface ToolStatus {
@@ -140,6 +142,15 @@ let _historyPollTimer: ReturnType<typeof setTimeout> | null = null;
 // error (e.g. "terminated"), it may retry internally and recover. We wait
 // before committing the error to give the recovery path a chance.
 let _errorRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+let _loadSessionsInFlight: Promise<void> | null = null;
+let _lastLoadSessionsAt = 0;
+const _historyLoadInFlight = new Map<string, Promise<void>>();
+const _lastHistoryLoadAtBySession = new Map<string, number>();
+const SESSION_LOAD_MIN_INTERVAL_MS = 1_200;
+const HISTORY_LOAD_MIN_INTERVAL_MS = 800;
+const HISTORY_POLL_SILENCE_WINDOW_MS = 2_500;
+const CHAT_EVENT_DEDUPE_TTL_MS = 30_000;
+const _chatEventDedupe = new Map<string, number>();
 
 function clearErrorRecoveryTimer(): void {
   if (_errorRecoveryTimer) {
@@ -153,6 +164,46 @@ function clearHistoryPoll(): void {
     clearTimeout(_historyPollTimer);
     _historyPollTimer = null;
   }
+}
+
+function pruneChatEventDedupe(now: number): void {
+  for (const [key, ts] of _chatEventDedupe.entries()) {
+    if (now - ts > CHAT_EVENT_DEDUPE_TTL_MS) {
+      _chatEventDedupe.delete(key);
+    }
+  }
+}
+
+function buildChatEventDedupeKey(eventState: string, event: Record<string, unknown>): string | null {
+  const runId = event.runId != null ? String(event.runId) : '';
+  const sessionKey = event.sessionKey != null ? String(event.sessionKey) : '';
+  const seq = event.seq != null ? String(event.seq) : '';
+  if (runId || sessionKey || seq || eventState) {
+    return [runId, sessionKey, seq, eventState].join('|');
+  }
+  const msg = (event.message && typeof event.message === 'object')
+    ? event.message as Record<string, unknown>
+    : null;
+  if (msg) {
+    const messageId = msg.id != null ? String(msg.id) : '';
+    const stopReason = msg.stopReason ?? msg.stop_reason;
+    if (messageId || stopReason) {
+      return `msg|${messageId}|${String(stopReason ?? '')}|${eventState}`;
+    }
+  }
+  return null;
+}
+
+function isDuplicateChatEvent(eventState: string, event: Record<string, unknown>): boolean {
+  const key = buildChatEventDedupeKey(eventState, event);
+  if (!key) return false;
+  const now = Date.now();
+  pruneChatEventDedupe(now);
+  if (_chatEventDedupe.has(key)) {
+    return true;
+  }
+  _chatEventDedupe.set(key, now);
+  return false;
 }
 
 const DEFAULT_CANONICAL_PREFIX = 'agent:main';
@@ -671,6 +722,32 @@ function getAgentIdFromSessionKey(sessionKey: string): string {
   return parts[1] || 'main';
 }
 
+function parseSessionUpdatedAtMs(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return toMs(value);
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+async function loadCronFallbackMessages(sessionKey: string, limit = 200): Promise<RawMessage[]> {
+  if (!isCronSessionKey(sessionKey)) return [];
+  try {
+    const response = await hostApiFetch<{ messages?: RawMessage[] }>(
+      buildCronSessionHistoryPath(sessionKey, limit),
+    );
+    return Array.isArray(response.messages) ? response.messages : [];
+  } catch (error) {
+    console.warn('Failed to load cron fallback history:', error);
+    return [];
+  }
+}
+
 function normalizeAgentId(value: string | undefined | null): string {
   return (value ?? '').trim().toLowerCase() || 'main';
 }
@@ -704,7 +781,14 @@ function buildSessionSwitchPatch(
   >,
   nextSessionKey: string,
 ): Partial<ChatState> {
-  const leavingEmpty = !state.currentSessionKey.endsWith(':main') && state.messages.length === 0;
+  // 仅将没有任何历史记录且无活动时间的会话视为空会话。
+  // 单纯依赖 messages.length 是不可靠的，因为 switchSession 会在真正调用 loadHistory 前抢先清空当前 messages，
+  // 造成竞争条件，使得带有真实历史的会话被判定为空并从侧边栏移除。
+  const leavingEmpty = !state.currentSessionKey.endsWith(':main')
+    && state.messages.length === 0
+    && !state.sessionLastActivity[state.currentSessionKey]
+    && !state.sessionLabels[state.currentSessionKey];
+
   const nextSessions = leavingEmpty
     ? state.sessions.filter((session) => session.key !== state.currentSessionKey)
     : state.sessions;
@@ -1014,113 +1098,146 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // ── Load sessions via sessions.list ──
 
   loadSessions: async () => {
-    try {
-      const data = await useGatewayStore.getState().rpc<Record<string, unknown>>('sessions.list', {});
-      if (data) {
-        const rawSessions = Array.isArray(data.sessions) ? data.sessions : [];
-        const sessions: ChatSession[] = rawSessions.map((s: Record<string, unknown>) => ({
-          key: String(s.key || ''),
-          label: s.label ? String(s.label) : undefined,
-          displayName: s.displayName ? String(s.displayName) : undefined,
-          thinkingLevel: s.thinkingLevel ? String(s.thinkingLevel) : undefined,
-          model: s.model ? String(s.model) : undefined,
-        })).filter((s: ChatSession) => s.key);
+    const now = Date.now();
+    if (_loadSessionsInFlight) {
+      await _loadSessionsInFlight;
+      return;
+    }
+    if (now - _lastLoadSessionsAt < SESSION_LOAD_MIN_INTERVAL_MS) {
+      return;
+    }
 
-        const canonicalBySuffix = new Map<string, string>();
-        for (const session of sessions) {
-          if (!session.key.startsWith('agent:')) continue;
-          const parts = session.key.split(':');
-          if (parts.length < 3) continue;
-          const suffix = parts.slice(2).join(':');
-          if (suffix && !canonicalBySuffix.has(suffix)) {
-            canonicalBySuffix.set(suffix, session.key);
+    _loadSessionsInFlight = (async () => {
+      try {
+        const data = await useGatewayStore.getState().rpc<Record<string, unknown>>('sessions.list', {});
+        if (data) {
+          const rawSessions = Array.isArray(data.sessions) ? data.sessions : [];
+          const sessions: ChatSession[] = rawSessions.map((s: Record<string, unknown>) => ({
+            key: String(s.key || ''),
+            label: s.label ? String(s.label) : undefined,
+            displayName: s.displayName ? String(s.displayName) : undefined,
+            thinkingLevel: s.thinkingLevel ? String(s.thinkingLevel) : undefined,
+            model: s.model ? String(s.model) : undefined,
+            updatedAt: parseSessionUpdatedAtMs(s.updatedAt),
+          })).filter((s: ChatSession) => s.key);
+
+          const canonicalBySuffix = new Map<string, string>();
+          for (const session of sessions) {
+            if (!session.key.startsWith('agent:')) continue;
+            const parts = session.key.split(':');
+            if (parts.length < 3) continue;
+            const suffix = parts.slice(2).join(':');
+            if (suffix && !canonicalBySuffix.has(suffix)) {
+              canonicalBySuffix.set(suffix, session.key);
+            }
           }
-        }
 
-        // Deduplicate: if both short and canonical existed, keep canonical only
-        const seen = new Set<string>();
-        const dedupedSessions = sessions.filter((s) => {
-          if (!s.key.startsWith('agent:') && canonicalBySuffix.has(s.key)) return false;
-          if (seen.has(s.key)) return false;
-          seen.add(s.key);
-          return true;
-        });
+          // Deduplicate: if both short and canonical existed, keep canonical only
+          const seen = new Set<string>();
+          const dedupedSessions = sessions.filter((s) => {
+            if (!s.key.startsWith('agent:') && canonicalBySuffix.has(s.key)) return false;
+            if (seen.has(s.key)) return false;
+            seen.add(s.key);
+            return true;
+          });
 
-        const { currentSessionKey, sessions: localSessions } = get();
-        let nextSessionKey = currentSessionKey || DEFAULT_SESSION_KEY;
-        if (!nextSessionKey.startsWith('agent:')) {
-          const canonicalMatch = canonicalBySuffix.get(nextSessionKey);
-          if (canonicalMatch) {
-            nextSessionKey = canonicalMatch;
+          const { currentSessionKey, sessions: localSessions } = get();
+          let nextSessionKey = currentSessionKey || DEFAULT_SESSION_KEY;
+          if (!nextSessionKey.startsWith('agent:')) {
+            const canonicalMatch = canonicalBySuffix.get(nextSessionKey);
+            if (canonicalMatch) {
+              nextSessionKey = canonicalMatch;
+            }
           }
-        }
-        if (!dedupedSessions.find((s) => s.key === nextSessionKey) && dedupedSessions.length > 0) {
-          // Preserve only locally-created pending sessions. On initial boot the
-          // default ghost key (`agent:main:main`) should yield to real history.
-          const hasLocalPendingSession = localSessions.some((session) => session.key === nextSessionKey);
-          if (!hasLocalPendingSession) {
-            nextSessionKey = dedupedSessions[0].key;
+          if (!dedupedSessions.find((s) => s.key === nextSessionKey) && dedupedSessions.length > 0) {
+            // Preserve only locally-created pending sessions. On initial boot the
+            // default ghost key (`agent:main:main`) should yield to real history.
+            const hasLocalPendingSession = localSessions.some((session) => session.key === nextSessionKey);
+            if (!hasLocalPendingSession) {
+              nextSessionKey = dedupedSessions[0].key;
+            }
           }
-        }
 
-        const sessionsWithCurrent = !dedupedSessions.find((s) => s.key === nextSessionKey) && nextSessionKey
-          ? [
-            ...dedupedSessions,
-            { key: nextSessionKey, displayName: nextSessionKey },
-          ]
-          : dedupedSessions;
+          const sessionsWithCurrent = !dedupedSessions.find((s) => s.key === nextSessionKey) && nextSessionKey
+            ? [
+              ...dedupedSessions,
+              { key: nextSessionKey, displayName: nextSessionKey },
+            ]
+            : dedupedSessions;
 
-        set({
-          sessions: sessionsWithCurrent,
-          currentSessionKey: nextSessionKey,
-          currentAgentId: getAgentIdFromSessionKey(nextSessionKey),
-        });
-
-        if (currentSessionKey !== nextSessionKey) {
-          get().loadHistory();
-        }
-
-        // Background: fetch first user message for every non-main session to populate labels upfront.
-        // Uses a small limit so it's cheap; runs in parallel and doesn't block anything.
-        const sessionsToLabel = sessionsWithCurrent.filter((s) => !s.key.endsWith(':main'));
-        if (sessionsToLabel.length > 0) {
-          void Promise.all(
-            sessionsToLabel.map(async (session) => {
-              try {
-                const r = await useGatewayStore.getState().rpc<Record<string, unknown>>(
-                  'chat.history',
-                  { sessionKey: session.key, limit: 1000 },
-                );
-                const msgs = Array.isArray(r.messages) ? r.messages as RawMessage[] : [];
-                const firstUser = msgs.find((m) => m.role === 'user');
-                const lastMsg = msgs[msgs.length - 1];
-                set((s) => {
-                  const next: Partial<typeof s> = {};
-                  if (firstUser) {
-                    const labelText = getMessageText(firstUser.content).trim();
-                    if (labelText) {
-                      const truncated = labelText.length > 50 ? `${labelText.slice(0, 50)}…` : labelText;
-                      next.sessionLabels = { ...s.sessionLabels, [session.key]: truncated };
-                    }
-                  }
-                  if (lastMsg?.timestamp) {
-                    next.sessionLastActivity = { ...s.sessionLastActivity, [session.key]: toMs(lastMsg.timestamp) };
-                  }
-                  return next;
-                });
-              } catch { /* ignore per-session errors */ }
-            }),
+          const discoveredActivity = Object.fromEntries(
+            sessionsWithCurrent
+              .filter((session) => typeof session.updatedAt === 'number' && Number.isFinite(session.updatedAt))
+              .map((session) => [session.key, session.updatedAt!]),
           );
+
+          set((state) => ({
+            sessions: sessionsWithCurrent,
+            currentSessionKey: nextSessionKey,
+            currentAgentId: getAgentIdFromSessionKey(nextSessionKey),
+            sessionLastActivity: {
+              ...state.sessionLastActivity,
+              ...discoveredActivity,
+            },
+          }));
+
+          if (currentSessionKey !== nextSessionKey) {
+            void get().loadHistory();
+          }
+
+          // Background: fetch first user message for every non-main session to populate labels upfront.
+          // Uses a small limit so it's cheap; runs in parallel and doesn't block anything.
+          const sessionsToLabel = sessionsWithCurrent.filter((s) => !s.key.endsWith(':main'));
+          if (sessionsToLabel.length > 0) {
+            void Promise.all(
+              sessionsToLabel.map(async (session) => {
+                try {
+                  const r = await useGatewayStore.getState().rpc<Record<string, unknown>>(
+                    'chat.history',
+                    { sessionKey: session.key, limit: 1000 },
+                  );
+                  const msgs = Array.isArray(r.messages) ? r.messages as RawMessage[] : [];
+                  const firstUser = msgs.find((m) => m.role === 'user');
+                  const lastMsg = msgs[msgs.length - 1];
+                  set((s) => {
+                    const next: Partial<typeof s> = {};
+                    if (firstUser) {
+                      const labelText = getMessageText(firstUser.content).trim();
+                      if (labelText) {
+                        const truncated = labelText.length > 50 ? `${labelText.slice(0, 50)}…` : labelText;
+                        next.sessionLabels = { ...s.sessionLabels, [session.key]: truncated };
+                      }
+                    }
+                    if (lastMsg?.timestamp) {
+                      next.sessionLastActivity = { ...s.sessionLastActivity, [session.key]: toMs(lastMsg.timestamp) };
+                    }
+                    return next;
+                  });
+                } catch {
+                  // ignore per-session errors
+                }
+              }),
+            );
+          }
         }
+      } catch (err) {
+        console.warn('Failed to load sessions:', err);
+      } finally {
+        _lastLoadSessionsAt = Date.now();
       }
-    } catch (err) {
-      console.warn('Failed to load sessions:', err);
+    })();
+
+    try {
+      await _loadSessionsInFlight;
+    } finally {
+      _loadSessionsInFlight = null;
     }
   },
 
   // ── Switch session ──
 
   switchSession: (key: string) => {
+    if (key === get().currentSessionKey) return;
     set((s) => buildSessionSwitchPatch(s, key));
     get().loadHistory();
   },
@@ -1209,8 +1326,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // NOTE: We intentionally do NOT call sessions.reset on the old session.
     // sessions.reset archives (renames) the session JSONL file, making old
     // conversation history inaccessible when the user switches back to it.
-    const { currentSessionKey, messages, sessions } = get();
-    const leavingEmpty = !currentSessionKey.endsWith(':main') && messages.length === 0;
+    const { currentSessionKey, messages, sessions, sessionLastActivity, sessionLabels } = get();
+    // 仅将没有任何历史记录且无活动时间的会话视为空会话
+    const leavingEmpty = !currentSessionKey.endsWith(':main')
+      && messages.length === 0
+      && !sessionLastActivity[currentSessionKey]
+      && !sessionLabels[currentSessionKey];
     const prefix = getCanonicalPrefixFromSessionKey(currentSessionKey)
       ?? getCanonicalPrefixFromSessions(sessions)
       ?? DEFAULT_CANONICAL_PREFIX;
@@ -1244,12 +1365,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // ── Cleanup empty session on navigate away ──
 
   cleanupEmptySession: () => {
-    const { currentSessionKey, messages } = get();
+    const { currentSessionKey, messages, sessionLastActivity, sessionLabels } = get();
     // Only remove non-main sessions that were never used (no messages sent).
     // This mirrors the "leavingEmpty" logic in switchSession so that creating
     // a new session and immediately navigating away doesn't leave a ghost entry
     // in the sidebar.
-    const isEmptyNonMain = !currentSessionKey.endsWith(':main') && messages.length === 0;
+    // 同样需要综合检查 sessionLastActivity 和 sessionLabels，
+    // 防止因为 switchSession 抢先清空 messages 而误判有历史的会话为空。
+    const isEmptyNonMain = !currentSessionKey.endsWith(':main')
+      && messages.length === 0
+      && !sessionLastActivity[currentSessionKey]
+      && !sessionLabels[currentSessionKey];
     if (!isEmptyNonMain) return;
     set((s) => ({
       sessions: s.sessions.filter((sess) => sess.key !== currentSessionKey),
@@ -1266,126 +1392,181 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   loadHistory: async (quiet = false) => {
     const { currentSessionKey } = get();
+    const existingLoad = _historyLoadInFlight.get(currentSessionKey);
+    if (existingLoad) {
+      await existingLoad;
+      return;
+    }
+
+    const lastLoadAt = _lastHistoryLoadAtBySession.get(currentSessionKey) || 0;
+    if (quiet && Date.now() - lastLoadAt < HISTORY_LOAD_MIN_INTERVAL_MS) {
+      return;
+    }
+
     if (!quiet) set({ loading: true, error: null });
 
-    try {
-      const data = await useGatewayStore.getState().rpc<Record<string, unknown>>(
-        'chat.history',
-        { sessionKey: currentSessionKey, limit: 200 },
-      );
-      if (data) {
-        const rawMessages = Array.isArray(data.messages) ? data.messages as RawMessage[] : [];
+    // 安全保护：如果历史记录加载花费太多时间，则强制将 loading 设置为 false
+    // 防止 UI 永远卡在转圈状态。
+    let loadingTimedOut = false;
+    const loadingSafetyTimer = quiet ? null : setTimeout(() => {
+      loadingTimedOut = true;
+      set({ loading: false });
+    }, 15_000);
 
-        // Before filtering: attach images/files from tool_result messages to the next assistant message
-        const messagesWithToolImages = enrichWithToolResultFiles(rawMessages);
-        const filteredMessages = messagesWithToolImages.filter((msg) => !isToolResultRole(msg.role));
-        // Restore file attachments for user/assistant messages (from cache + text patterns)
-        const enrichedMessages = enrichWithCachedImages(filteredMessages);
-        const thinkingLevel = data.thinkingLevel ? String(data.thinkingLevel) : null;
+    const loadPromise = (async () => {
+      const applyLoadedMessages = (rawMessages: RawMessage[], thinkingLevel: string | null) => {
+      // Before filtering: attach images/files from tool_result messages to the next assistant message
+      const messagesWithToolImages = enrichWithToolResultFiles(rawMessages);
+      const filteredMessages = messagesWithToolImages.filter((msg) => !isToolResultRole(msg.role));
+      // Restore file attachments for user/assistant messages (from cache + text patterns)
+      const enrichedMessages = enrichWithCachedImages(filteredMessages);
 
-        // Preserve the optimistic user message during an active send.
-        // The Gateway may not include the user's message in chat.history
-        // until the run completes, causing it to flash out of the UI.
-        let finalMessages = enrichedMessages;
-        const userMsgAt = get().lastUserMessageAt;
-        if (get().sending && userMsgAt) {
-          const userMsMs = toMs(userMsgAt);
-          const hasRecentUser = enrichedMessages.some(
+      // Preserve the optimistic user message during an active send.
+      // The Gateway may not include the user's message in chat.history
+      // until the run completes, causing it to flash out of the UI.
+      let finalMessages = enrichedMessages;
+      const userMsgAt = get().lastUserMessageAt;
+      if (get().sending && userMsgAt) {
+        const userMsMs = toMs(userMsgAt);
+        const hasRecentUser = enrichedMessages.some(
+          (m) => m.role === 'user' && m.timestamp && Math.abs(toMs(m.timestamp) - userMsMs) < 5000,
+        );
+        if (!hasRecentUser) {
+          const currentMsgs = get().messages;
+          const optimistic = [...currentMsgs].reverse().find(
             (m) => m.role === 'user' && m.timestamp && Math.abs(toMs(m.timestamp) - userMsMs) < 5000,
           );
-          if (!hasRecentUser) {
-            const currentMsgs = get().messages;
-            const optimistic = [...currentMsgs].reverse().find(
-              (m) => m.role === 'user' && m.timestamp && Math.abs(toMs(m.timestamp) - userMsMs) < 5000,
-            );
-            if (optimistic) {
-              finalMessages = [...enrichedMessages, optimistic];
-            }
+          if (optimistic) {
+            finalMessages = [...enrichedMessages, optimistic];
           }
         }
-
-        set({ messages: finalMessages, thinkingLevel, loading: false });
-
-        // Extract first user message text as a session label for display in the toolbar.
-        // Skip main sessions (key ends with ":main") — they rely on the Gateway-provided
-        // displayName (e.g. the configured agent name "ClawX") instead.
-        const isMainSession = currentSessionKey.endsWith(':main');
-        if (!isMainSession) {
-          const firstUserMsg = finalMessages.find((m) => m.role === 'user');
-          if (firstUserMsg) {
-            const labelText = getMessageText(firstUserMsg.content).trim();
-            if (labelText) {
-              const truncated = labelText.length > 50 ? `${labelText.slice(0, 50)}…` : labelText;
-              set((s) => ({
-                sessionLabels: { ...s.sessionLabels, [currentSessionKey]: truncated },
-              }));
-            }
-          }
-        }
-
-        // Record last activity time from the last message in history
-        const lastMsg = finalMessages[finalMessages.length - 1];
-        if (lastMsg?.timestamp) {
-          const lastAt = toMs(lastMsg.timestamp);
-          set((s) => ({
-            sessionLastActivity: { ...s.sessionLastActivity, [currentSessionKey]: lastAt },
-          }));
-        }
-
-        // Async: load missing image previews from disk (updates in background)
-        loadMissingPreviews(finalMessages).then((updated) => {
-          if (updated) {
-            // Create new object references so React.memo detects changes.
-            // loadMissingPreviews mutates AttachedFileMeta in place, so we
-            // must produce fresh message + file references for each affected msg.
-            set({
-              messages: finalMessages.map(msg =>
-                msg._attachedFiles
-                  ? { ...msg, _attachedFiles: msg._attachedFiles.map(f => ({ ...f })) }
-                  : msg
-              ),
-            });
-          }
-        });
-        const { pendingFinal, lastUserMessageAt, sending: isSendingNow } = get();
-
-        // If we're sending but haven't received streaming events, check
-        // whether the loaded history reveals intermediate tool-call activity.
-        // This surfaces progress via the pendingFinal → ActivityIndicator path.
-        const userMsTs = lastUserMessageAt ? toMs(lastUserMessageAt) : 0;
-        const isAfterUserMsg = (msg: RawMessage): boolean => {
-          if (!userMsTs || !msg.timestamp) return true;
-          return toMs(msg.timestamp) >= userMsTs;
-        };
-
-        if (isSendingNow && !pendingFinal) {
-          const hasRecentAssistantActivity = [...filteredMessages].reverse().some((msg) => {
-            if (msg.role !== 'assistant') return false;
-            return isAfterUserMsg(msg);
-          });
-          if (hasRecentAssistantActivity) {
-            set({ pendingFinal: true });
-          }
-        }
-
-        // If pendingFinal, check whether the AI produced a final text response.
-        if (pendingFinal || get().pendingFinal) {
-          const recentAssistant = [...filteredMessages].reverse().find((msg) => {
-            if (msg.role !== 'assistant') return false;
-            if (!hasNonToolAssistantContent(msg)) return false;
-            return isAfterUserMsg(msg);
-          });
-          if (recentAssistant) {
-            clearHistoryPoll();
-            set({ sending: false, activeRunId: null, pendingFinal: false });
-          }
-        }
-      } else {
-        set({ messages: [], loading: false });
       }
-    } catch (err) {
-      console.warn('Failed to load chat history:', err);
-      set({ messages: [], loading: false });
+
+      set({ messages: finalMessages, thinkingLevel, loading: false });
+
+      // Extract first user message text as a session label for display in the toolbar.
+      // Skip main sessions (key ends with ":main") — they rely on the Gateway-provided
+      // displayName (e.g. the configured agent name "ClawX") instead.
+      const isMainSession = currentSessionKey.endsWith(':main');
+      if (!isMainSession) {
+        const firstUserMsg = finalMessages.find((m) => m.role === 'user');
+        if (firstUserMsg) {
+          const labelText = getMessageText(firstUserMsg.content).trim();
+          if (labelText) {
+            const truncated = labelText.length > 50 ? `${labelText.slice(0, 50)}…` : labelText;
+            set((s) => ({
+              sessionLabels: { ...s.sessionLabels, [currentSessionKey]: truncated },
+            }));
+          }
+        }
+      }
+
+      // Record last activity time from the last message in history
+      const lastMsg = finalMessages[finalMessages.length - 1];
+      if (lastMsg?.timestamp) {
+        const lastAt = toMs(lastMsg.timestamp);
+        set((s) => ({
+          sessionLastActivity: { ...s.sessionLastActivity, [currentSessionKey]: lastAt },
+        }));
+      }
+
+      // Async: load missing image previews from disk (updates in background)
+      loadMissingPreviews(finalMessages).then((updated) => {
+        if (updated) {
+          // Create new object references so React.memo detects changes.
+          // loadMissingPreviews mutates AttachedFileMeta in place, so we
+          // must produce fresh message + file references for each affected msg.
+          set({
+            messages: finalMessages.map(msg =>
+              msg._attachedFiles
+                ? { ...msg, _attachedFiles: msg._attachedFiles.map(f => ({ ...f })) }
+                : msg
+            ),
+          });
+        }
+      });
+      const { pendingFinal, lastUserMessageAt, sending: isSendingNow } = get();
+
+      // If we're sending but haven't received streaming events, check
+      // whether the loaded history reveals intermediate tool-call activity.
+      // This surfaces progress via the pendingFinal → ActivityIndicator path.
+      const userMsTs = lastUserMessageAt ? toMs(lastUserMessageAt) : 0;
+      const isAfterUserMsg = (msg: RawMessage): boolean => {
+        if (!userMsTs || !msg.timestamp) return true;
+        return toMs(msg.timestamp) >= userMsTs;
+      };
+
+      if (isSendingNow && !pendingFinal) {
+        const hasRecentAssistantActivity = [...filteredMessages].reverse().some((msg) => {
+          if (msg.role !== 'assistant') return false;
+          return isAfterUserMsg(msg);
+        });
+        if (hasRecentAssistantActivity) {
+          set({ pendingFinal: true });
+        }
+      }
+
+      // If pendingFinal, check whether the AI produced a final text response.
+      if (pendingFinal || get().pendingFinal) {
+        const recentAssistant = [...filteredMessages].reverse().find((msg) => {
+          if (msg.role !== 'assistant') return false;
+          if (!hasNonToolAssistantContent(msg)) return false;
+          return isAfterUserMsg(msg);
+        });
+        if (recentAssistant) {
+          clearHistoryPoll();
+          set({ sending: false, activeRunId: null, pendingFinal: false });
+        }
+      }
+      };
+
+      try {
+        const data = await useGatewayStore.getState().rpc<Record<string, unknown>>(
+          'chat.history',
+          { sessionKey: currentSessionKey, limit: 200 },
+        );
+        if (data) {
+          let rawMessages = Array.isArray(data.messages) ? data.messages as RawMessage[] : [];
+          const thinkingLevel = data.thinkingLevel ? String(data.thinkingLevel) : null;
+          if (rawMessages.length === 0 && isCronSessionKey(currentSessionKey)) {
+            rawMessages = await loadCronFallbackMessages(currentSessionKey, 200);
+          }
+
+          applyLoadedMessages(rawMessages, thinkingLevel);
+        } else {
+          const fallbackMessages = await loadCronFallbackMessages(currentSessionKey, 200);
+          if (fallbackMessages.length > 0) {
+            applyLoadedMessages(fallbackMessages, null);
+          } else {
+            set({ messages: [], loading: false });
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to load chat history:', err);
+        const fallbackMessages = await loadCronFallbackMessages(currentSessionKey, 200);
+        if (fallbackMessages.length > 0) {
+          applyLoadedMessages(fallbackMessages, null);
+        } else {
+          set({ messages: [], loading: false });
+        }
+      }
+    })();
+
+    _historyLoadInFlight.set(currentSessionKey, loadPromise);
+    try {
+      await loadPromise;
+    } finally {
+      // 正常完成时清除安全定时器
+      if (loadingSafetyTimer) clearTimeout(loadingSafetyTimer);
+      if (!loadingTimedOut) {
+        // Only update load time if we actually didn't time out
+        _lastHistoryLoadAtBySession.set(currentSessionKey, Date.now());
+      }
+      
+      const active = _historyLoadInFlight.get(currentSessionKey);
+      if (active === loadPromise) {
+        _historyLoadInFlight.delete(currentSessionKey);
+      }
     }
   },
 
@@ -1458,6 +1639,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const state = get();
       if (!state.sending) { clearHistoryPoll(); return; }
       if (state.streamingMessage) {
+        _historyPollTimer = setTimeout(pollHistory, POLL_INTERVAL);
+        return;
+      }
+      if (Date.now() - _lastChatEventAt < HISTORY_POLL_SILENCE_WINDOW_MS) {
         _historyPollTimer = setTimeout(pollHistory, POLL_INTERVAL);
         return;
       }
@@ -1594,6 +1779,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // Only process events for the active run (or if no active run set)
     if (activeRunId && runId && runId !== activeRunId) return;
+
+    if (isDuplicateChatEvent(eventState, event)) return;
 
     _lastChatEventAt = Date.now();
 

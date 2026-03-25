@@ -57,7 +57,7 @@ export function createTray(mainWindow: BrowserWindow): Tray {
   tray = new Tray(icon);
   
   // Set tooltip
-  tray.setToolTip('ClawX - AI Assistant');
+  tray.setToolTip('ClawTeams - AI Assistant');
   
   const showWindow = () => {
     if (mainWindow.isDestroyed()) return;
@@ -68,7 +68,7 @@ export function createTray(mainWindow: BrowserWindow): Tray {
   // Create context menu
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Show ClawX',
+      label: 'Show ClawTeams',
       click: showWindow,
     },
     {
@@ -91,19 +91,11 @@ export function createTray(mainWindow: BrowserWindow): Tray {
       label: 'Quick Actions',
       submenu: [
         {
-          label: 'Open Dashboard',
-          click: () => {
-            if (mainWindow.isDestroyed()) return;
-            mainWindow.show();
-            mainWindow.webContents.send('navigate', '/');
-          },
-        },
-        {
           label: 'Open Chat',
           click: () => {
             if (mainWindow.isDestroyed()) return;
             mainWindow.show();
-            mainWindow.webContents.send('navigate', '/chat');
+            mainWindow.webContents.send('navigate', '/');
           },
         },
         {
@@ -130,7 +122,7 @@ export function createTray(mainWindow: BrowserWindow): Tray {
       type: 'separator',
     },
     {
-      label: 'Quit ClawX',
+      label: 'Quit ClawTeams',
       click: () => {
         app.quit();
       },
@@ -165,7 +157,7 @@ export function createTray(mainWindow: BrowserWindow): Tray {
  */
 export function updateTrayStatus(status: string): void {
   if (tray) {
-    tray.setToolTip(`ClawX - ${status}`);
+    tray.setToolTip(`ClawTeams - ${status}`);
   }
 }
 

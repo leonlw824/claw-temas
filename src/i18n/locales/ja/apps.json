@@ -1,0 +1,19 @@
+{
+  "pageTitle": "アプリケーション",
+  "subtitle": "インストール済みのアプリケーションを管理",
+  "refresh": "更新",
+  "noApps": "インストール済みのアプリケーションがありません",
+  "internal": "内蔵",
+  "external": "外部",
+  "noDescription": "説明がありません",
+  "enable": "有効化",
+  "disable": "無効化",
+  "confirmUninstall": "このアプリケーションをアンインストールしてもよろしいですか？",
+  "toast": {
+    "appEnabled": "アプリケーションが有効になりました",
+    "appDisabled": "アプリケーションが無効になりました",
+    "appUninstalled": "アプリケーションがアンインストールされました",
+    "toggleFailed": "アプリケーションの切り替えに失敗しました：{{error}}",
+    "uninstallFailed": "アプリケーションのアンインストールに失敗しました：{{error}}"
+  }
+}

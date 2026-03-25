@@ -2,13 +2,15 @@
   "title": "Settings",
   "subtitle": "Configure your ClawTeams experience",
   "appearance": {
-    "title": "Appearance",
+    "title": "General",
     "description": "Customize the look and feel",
     "theme": "Theme",
     "light": "Light",
     "dark": "Dark",
     "system": "System",
-    "language": "Language"
+    "language": "Language",
+    "launchAtStartup": "Launch at system startup",
+    "launchAtStartupDesc": "Automatically launch ClawTeams when you log in"
   },
   "aiProviders": {
     "title": "AI Providers",
@@ -61,6 +63,7 @@
       "change": "Change provider",
       "add": "Add Provider",
       "save": "Save",
+      "customDoc": "Documentation",
       "validate": "Validate"
     },
     "card": {
@@ -76,6 +79,8 @@
     },
     "protocols": {
       "openai": "OpenAI Compatible",
+      "openaiCompletions": "OpenAI Completions",
+      "openaiResponses": "OpenAI Responses",
       "anthropic": "Anthropic Compatible"
     },
     "toast": {
@@ -194,7 +199,9 @@
       }
     },
     "devMode": "Developer Mode",
-    "devModeDesc": "Show developer tools and shortcuts"
+    "devModeDesc": "Show developer tools and shortcuts",
+    "telemetry": "Anonymous Usage Data",
+    "telemetryDesc": "Allow providing anonymous basic usage data to improve ClawTeams"
   },
   "developer": {
     "title": "Developer",
@@ -212,6 +219,29 @@
     "cliPowershell": "PowerShell command.",
     "cmdUnavailable": "Command unavailable",
     "cmdCopied": "CLI command copied",
+    "doctor": "OpenClaw Doctor",
+    "doctorDesc": "Run `openclaw doctor` and inspect the raw diagnostic output.",
+    "runDoctor": "Run Doctor",
+    "runDoctorFix": "Run Doctor Fix",
+    "doctorSucceeded": "OpenClaw doctor completed",
+    "doctorFailed": "OpenClaw doctor reported issues",
+    "doctorRunFailed": "Failed to run OpenClaw doctor",
+    "doctorFixSucceeded": "OpenClaw doctor fix completed",
+    "doctorFixFailed": "OpenClaw doctor fix reported issues",
+    "doctorFixRunFailed": "Failed to run OpenClaw doctor fix",
+    "doctorCopied": "Doctor output copied",
+    "doctorOk": "Healthy",
+    "doctorIssue": "Issues Found",
+    "doctorFixOk": "Fixed",
+    "doctorFixIssue": "Fix Failed",
+    "doctorExitCode": "Exit code",
+    "doctorDuration": "Duration",
+    "doctorCommand": "Command",
+    "doctorWorkingDir": "Working dir",
+    "doctorError": "Error",
+    "doctorStdout": "Stdout",
+    "doctorStderr": "Stderr",
+    "doctorOutputEmpty": "(empty)",
     "wsDiagnostic": "WS Diagnostic Mode",
     "wsDiagnosticDesc": "Temporarily enable WS/HTTP fallback chain for gateway RPC debugging.",
     "wsDiagnosticEnabled": "WS diagnostic mode enabled",
@@ -238,6 +268,7 @@
     "basedOn": "Based on OpenClaw",
     "version": "Version {{version}}",
     "docs": "Website",
-    "github": "GitHub"
+    "github": "GitHub",
+    "faq": "FAQ"
   }
 }

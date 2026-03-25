@@ -53,6 +53,8 @@ export function Settings() {
     setTheme,
     language,
     setLanguage,
+    launchAtStartup,
+    setLaunchAtStartup,
     gatewayAutoStart,
     setGatewayAutoStart,
     proxyEnabled,
@@ -73,6 +75,8 @@ export function Settings() {
     setAutoDownloadUpdate,
     devModeUnlocked,
     setDevModeUnlocked,
+    telemetryEnabled,
+    setTelemetryEnabled,
   } = useSettingsStore();
 
   const { status: gatewayStatus, restart: restartGateway } = useGatewayStore();
@@ -96,6 +100,19 @@ export function Settings() {
   const showCliTools = true;
   const [showLogs, setShowLogs] = useState(false);
   const [logContent, setLogContent] = useState('');
+  const [doctorRunningMode, setDoctorRunningMode] = useState<'diagnose' | 'fix' | null>(null);
+  const [doctorResult, setDoctorResult] = useState<{
+    mode: 'diagnose' | 'fix';
+    success: boolean;
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    command: string;
+    cwd: string;
+    durationMs: number;
+    timedOut?: boolean;
+    error?: string;
+  } | null>(null);
 
   const handleShowLogs = async () => {
     try {
@@ -116,6 +133,72 @@ export function Settings() {
       }
     } catch {
       // ignore
+    }
+  };
+
+  const handleRunOpenClawDoctor = async (mode: 'diagnose' | 'fix') => {
+    setDoctorRunningMode(mode);
+    try {
+      const result = await hostApiFetch<{
+        mode: 'diagnose' | 'fix';
+        success: boolean;
+        exitCode: number | null;
+        stdout: string;
+        stderr: string;
+        command: string;
+        cwd: string;
+        durationMs: number;
+        timedOut?: boolean;
+        error?: string;
+      }>('/api/app/openclaw-doctor', {
+        method: 'POST',
+        body: JSON.stringify({ mode }),
+      });
+      setDoctorResult(result);
+      if (result.success) {
+        toast.success(mode === 'fix' ? t('developer.doctorFixSucceeded') : t('developer.doctorSucceeded'));
+      } else {
+        toast.error(result.error || (mode === 'fix' ? t('developer.doctorFixFailed') : t('developer.doctorFailed')));
+      }
+    } catch (error) {
+      const message = toUserMessage(error) || (mode === 'fix' ? t('developer.doctorFixRunFailed') : t('developer.doctorRunFailed'));
+      toast.error(message);
+      setDoctorResult({
+        mode,
+        success: false,
+        exitCode: null,
+        stdout: '',
+        stderr: '',
+        command: 'openclaw doctor',
+        cwd: '',
+        durationMs: 0,
+        error: message,
+      });
+    } finally {
+      setDoctorRunningMode(null);
+    }
+  };
+
+  const handleCopyDoctorOutput = async () => {
+    if (!doctorResult) return;
+    const payload = [
+      `command: ${doctorResult.command}`,
+      `cwd: ${doctorResult.cwd}`,
+      `exitCode: ${doctorResult.exitCode ?? 'null'}`,
+      `durationMs: ${doctorResult.durationMs}`,
+      '',
+      '[stdout]',
+      doctorResult.stdout.trim() || '(empty)',
+      '',
+      '[stderr]',
+      doctorResult.stderr.trim() || '(empty)',
+    ].join('\n');
+
+    try {
+      await navigator.clipboard.writeText(payload);
+      toast.success(t('developer.doctorCopied'));
+    } catch (error) {
+      toast.error(`Failed to copy doctor output: ${String(error)}`);
     }
   };
 
@@ -366,15 +449,15 @@ export function Settings() {
 
   return (
     <div className="flex flex-col -m-6 dark:bg-background h-[calc(100vh-2.5rem)] overflow-hidden">
-      <div className="w-full max-w-4xl mx-auto flex flex-col h-full p-10 pt-16">
-        
+      <div className="w-full max-w-5xl mx-auto flex flex-col h-full p-10 pt-16">
+
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-start justify-between mb-12 shrink-0 gap-4">
           <div>
             <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-3 font-normal tracking-tight" style={{ fontFamily: 'Georgia, Cambria, "Times New Roman", Times, serif' }}>
               {t('title')}
             </h1>
-            <p className="text-[17px] text-foreground/80 font-medium">
+            <p className="text-[17px] text-foreground/70 font-medium">
               {t('subtitle')}
             </p>
           </div>
@@ -433,6 +516,18 @@ export function Settings() {
                   ))}
                 </div>
               </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-[15px] font-medium text-foreground/80">{t('appearance.launchAtStartup')}</Label>
+                  <p className="text-[13px] text-muted-foreground mt-1">
+                    {t('appearance.launchAtStartupDesc')}
+                  </p>
+                </div>
+                <Switch
+                  checked={launchAtStartup}
+                  onCheckedChange={setLaunchAtStartup}
+                />
+              </div>
             </div>
           </div>
 
@@ -454,13 +549,13 @@ export function Settings() {
                 <div className="flex flex-wrap items-center gap-2">
                   <div className={cn(
                     "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] font-medium border",
-                    gatewayStatus.state === 'running' ? "bg-green-500/10 text-green-600 dark:text-green-500 border-green-500/20" : 
-                    gatewayStatus.state === 'error' ? "bg-red-500/10 text-red-600 dark:text-red-500 border-red-500/20" : 
-                    "bg-black/5 dark:bg-white/5 text-muted-foreground border-transparent"
+                    gatewayStatus.state === 'running' ? "bg-green-500/10 text-green-600 dark:text-green-500 border-green-500/20" :
+                      gatewayStatus.state === 'error' ? "bg-red-500/10 text-red-600 dark:text-red-500 border-red-500/20" :
+                        "bg-black/5 dark:bg-white/5 text-muted-foreground border-transparent"
                   )}>
-                    <div className={cn("w-1.5 h-1.5 rounded-full", 
-                      gatewayStatus.state === 'running' ? "bg-green-500" : 
-                      gatewayStatus.state === 'error' ? "bg-red-500" : "bg-muted-foreground"
+                    <div className={cn("w-1.5 h-1.5 rounded-full",
+                      gatewayStatus.state === 'running' ? "bg-green-500" :
+                        gatewayStatus.state === 'error' ? "bg-red-500" : "bg-muted-foreground"
                     )} />
                     {gatewayStatus.state}
                   </div>
@@ -489,7 +584,7 @@ export function Settings() {
                       </Button>
                     </div>
                   </div>
-                  <pre className="text-[12px] text-muted-foreground bg-white dark:bg-[#1a1a19] p-4 rounded-xl max-h-60 overflow-auto whitespace-pre-wrap font-mono border border-black/5 dark:border-white/5 shadow-inner">
+                  <pre className="text-[12px] text-muted-foreground bg-white dark:bg-card p-4 rounded-xl max-h-60 overflow-auto whitespace-pre-wrap font-mono border border-black/5 dark:border-white/5 shadow-inner">
                     {logContent || t('chat:noLogs')}
                   </pre>
                 </div>
@@ -519,7 +614,20 @@ export function Settings() {
                 <Switch
                   checked={devModeUnlocked}
                   onCheckedChange={setDevModeUnlocked}
-                  />
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-[15px] font-medium text-foreground">{t('advanced.telemetry')}</Label>
+                  <p className="text-[13px] text-muted-foreground mt-1">
+                    {t('advanced.telemetryDesc')}
+                  </p>
+                </div>
+                <Switch
+                  checked={telemetryEnabled}
+                  onCheckedChange={setTelemetryEnabled}
+                />
               </div>
 
             </div>
@@ -709,6 +817,86 @@ export function Settings() {
                   )}
 
                   <div className="space-y-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <Label className="text-[14px] font-medium text-foreground">{t('developer.doctor')}</Label>
+                        <p className="text-[13px] text-muted-foreground mt-1">
+                          {t('developer.doctorDesc')}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => void handleRunOpenClawDoctor('diagnose')}
+                          disabled={doctorRunningMode !== null}
+                          className="rounded-xl h-10 px-4 bg-transparent border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5"
+                        >
+                          <RefreshCw className={`h-4 w-4 mr-2${doctorRunningMode === 'diagnose' ? ' animate-spin' : ''}`} />
+                          {doctorRunningMode === 'diagnose' ? t('common:status.running') : t('developer.runDoctor')}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => void handleRunOpenClawDoctor('fix')}
+                          disabled={doctorRunningMode !== null}
+                          className="rounded-xl h-10 px-4 bg-transparent border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5"
+                        >
+                          <RefreshCw className={`h-4 w-4 mr-2${doctorRunningMode === 'fix' ? ' animate-spin' : ''}`} />
+                          {doctorRunningMode === 'fix' ? t('common:status.running') : t('developer.runDoctorFix')}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleCopyDoctorOutput}
+                          disabled={!doctorResult}
+                          className="rounded-xl h-10 px-4 bg-transparent border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5"
+                        >
+                          <Copy className="h-4 w-4 mr-2" />
+                          {t('common:actions.copy')}
+                        </Button>
+                      </div>
+                    </div>
+
+                    {doctorResult && (
+                      <div className="space-y-3 rounded-2xl border border-black/10 dark:border-white/10 p-5 bg-black/5 dark:bg-white/5">
+                        <div className="flex flex-wrap gap-2 text-[12px]">
+                          <Badge variant={doctorResult.success ? 'secondary' : 'destructive'} className="rounded-full px-3 py-1">
+                            {doctorResult.mode === 'fix'
+                              ? (doctorResult.success ? t('developer.doctorFixOk') : t('developer.doctorFixIssue'))
+                              : (doctorResult.success ? t('developer.doctorOk') : t('developer.doctorIssue'))}
+                          </Badge>
+                          <Badge variant="outline" className="rounded-full px-3 py-1">
+                            {t('developer.doctorExitCode')}: {doctorResult.exitCode ?? 'null'}
+                          </Badge>
+                          <Badge variant="outline" className="rounded-full px-3 py-1">
+                            {t('developer.doctorDuration')}: {Math.round(doctorResult.durationMs)}ms
+                          </Badge>
+                        </div>
+                        <div className="space-y-1 text-[12px] text-muted-foreground font-mono break-all">
+                          <p>{t('developer.doctorCommand')}: {doctorResult.command}</p>
+                          <p>{t('developer.doctorWorkingDir')}: {doctorResult.cwd || '-'}</p>
+                          {doctorResult.error && <p>{t('developer.doctorError')}: {doctorResult.error}</p>}
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="space-y-2">
+                            <p className="text-[12px] font-semibold text-foreground/80">{t('developer.doctorStdout')}</p>
+                            <pre className="max-h-72 overflow-auto rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-card p-3 text-[11px] font-mono whitespace-pre-wrap break-words">
+                              {doctorResult.stdout.trim() || t('developer.doctorOutputEmpty')}
+                            </pre>
+                          </div>
+                          <div className="space-y-2">
+                            <p className="text-[12px] font-semibold text-foreground/80">{t('developer.doctorStderr')}</p>
+                            <pre className="max-h-72 overflow-auto rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-card p-3 text-[11px] font-mono whitespace-pre-wrap break-words">
+                              {doctorResult.stderr.trim() || t('developer.doctorOutputEmpty')}
+                            </pre>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-4">
                     <div className="flex items-center justify-between rounded-2xl border border-black/10 dark:border-white/10 p-5 bg-transparent">
                       <div>
                         <Label className="text-[14px] font-medium text-foreground">{t('developer.wsDiagnostic')}</Label>
@@ -745,25 +933,25 @@ export function Settings() {
                     {showTelemetryViewer && (
                       <div className="space-y-4 rounded-2xl border border-black/10 dark:border-white/10 p-5 bg-black/5 dark:bg-white/5">
                         <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="secondary" className="rounded-full px-3 py-1 bg-white dark:bg-[#1a1a19] border border-black/5 dark:border-white/5">{t('developer.telemetryTotal')}: {telemetryStats.total}</Badge>
-                          <Badge variant={telemetryStats.errorCount > 0 ? 'destructive' : 'secondary'} className={cn("rounded-full px-3 py-1", telemetryStats.errorCount === 0 && "bg-white dark:bg-[#1a1a19] border border-black/5 dark:border-white/5")}>
+                          <Badge variant="secondary" className="rounded-full px-3 py-1 bg-white dark:bg-card border border-black/5 dark:border-white/5">{t('developer.telemetryTotal')}: {telemetryStats.total}</Badge>
+                          <Badge variant={telemetryStats.errorCount > 0 ? 'destructive' : 'secondary'} className={cn("rounded-full px-3 py-1", telemetryStats.errorCount === 0 && "bg-white dark:bg-card border border-black/5 dark:border-white/5")}>
                             {t('developer.telemetryErrors')}: {telemetryStats.errorCount}
                           </Badge>
-                          <Badge variant={telemetryStats.slowCount > 0 ? 'secondary' : 'outline'} className={cn("rounded-full px-3 py-1", telemetryStats.slowCount === 0 && "bg-white dark:bg-[#1a1a19] border border-black/5 dark:border-white/5")}>
+                          <Badge variant={telemetryStats.slowCount > 0 ? 'secondary' : 'outline'} className={cn("rounded-full px-3 py-1", telemetryStats.slowCount === 0 && "bg-white dark:bg-card border border-black/5 dark:border-white/5")}>
                             {t('developer.telemetrySlow')}: {telemetryStats.slowCount}
                           </Badge>
                           <div className="ml-auto flex gap-2">
-                            <Button type="button" variant="outline" size="sm" onClick={handleCopyTelemetry} className="rounded-full h-8 px-4 bg-white dark:bg-[#1a1a19] border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/10">
+                            <Button type="button" variant="outline" size="sm" onClick={handleCopyTelemetry} className="rounded-full h-8 px-4 bg-white dark:bg-card border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/10">
                               <Copy className="h-3.5 w-3.5 mr-1.5" />
                               {t('common:actions.copy')}
                             </Button>
-                            <Button type="button" variant="outline" size="sm" onClick={handleClearTelemetry} className="rounded-full h-8 px-4 bg-white dark:bg-[#1a1a19] border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/10">
+                            <Button type="button" variant="outline" size="sm" onClick={handleClearTelemetry} className="rounded-full h-8 px-4 bg-white dark:bg-card border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/10">
                               {t('common:actions.clear')}
                             </Button>
                           </div>
                         </div>
 
-                        <div className="max-h-80 overflow-auto rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-[#1a1a19] shadow-inner">
+                        <div className="max-h-80 overflow-auto rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-card shadow-inner">
                           {telemetryByEvent.length > 0 && (
                             <div className="border-b border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 p-3">
                               <p className="mb-3 text-[12px] font-semibold text-muted-foreground">
@@ -773,7 +961,7 @@ export function Settings() {
                                 {telemetryByEvent.map((item) => (
                                   <div
                                     key={item.event}
-                                    className="grid grid-cols-[minmax(0,1.6fr)_0.7fr_0.9fr_0.8fr_1fr] gap-2 rounded-lg border border-black/5 dark:border-white/5 bg-white dark:bg-[#1a1a19] px-3 py-2"
+                                    className="grid grid-cols-[minmax(0,1.6fr)_0.7fr_0.9fr_0.8fr_1fr] gap-2 rounded-lg border border-black/5 dark:border-white/5 bg-white dark:bg-card px-3 py-2"
                                   >
                                     <span className="truncate font-medium" title={item.event}>{item.event}</span>
                                     <span className="text-muted-foreground">n={item.count}</span>
@@ -884,6 +1072,13 @@ export function Settings() {
                   onClick={() => window.electron.openExternal('https://github.com/ValueCell-ai/ClawX')}
                 >
                   {t('about.github')}
+                </Button>
+                <Button
+                  variant="link"
+                  className="h-auto p-0 text-[14px] text-blue-500 hover:text-blue-600 font-medium"
+                  onClick={() => window.electron.openExternal('https://icnnp7d0dymg.feishu.cn/wiki/UyfOwQ2cAiJIP6kqUW8cte5Bnlc')}
+                >
+                  {t('about.faq')}
                 </Button>
               </div>
             </div>

@@ -33,6 +33,13 @@ export interface ClawHubSkillResult {
     stars?: number;
 }
 
+export interface ClawHubInstalledSkillResult {
+    slug: string;
+    version: string;
+    source?: string;
+    baseDir?: string;
+}
+
 export class ClawHubService {
     private workDir: string;
     private cliPath: string;
@@ -65,6 +72,55 @@ export class ClawHubService {
 
     private stripAnsi(line: string): string {
         return line.replace(this.ansiRegex, '').trim();
+    }
+
+    private extractFrontmatterName(skillManifestPath: string): string | null {
+        try {
+            const raw = fs.readFileSync(skillManifestPath, 'utf8');
+            // Match the first frontmatter block and read `name: ...`
+            const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---/);
+            if (!frontmatterMatch) return null;
+            const body = frontmatterMatch[1];
+            const nameMatch = body.match(/^\s*name\s*:\s*["']?([^"'\n]+)["']?\s*$/m);
+            if (!nameMatch) return null;
+            const name = nameMatch[1].trim();
+            return name || null;
+        } catch {
+            return null;
+        }
+    }
+
+    private resolveSkillDirByManifestName(candidates: string[]): string | null {
+        const skillsRoot = path.join(this.workDir, 'skills');
+        if (!fs.existsSync(skillsRoot)) return null;
+
+        const wanted = new Set(
+            candidates
+                .map((v) => v.trim().toLowerCase())
+                .filter((v) => v.length > 0),
+        );
+        if (wanted.size === 0) return null;
+
+        let entries: fs.Dirent[];
+        try {
+            entries = fs.readdirSync(skillsRoot, { withFileTypes: true });
+        } catch {
+            return null;
+        }
+
+        for (const entry of entries) {
+            if (!entry.isDirectory()) continue;
+            const skillDir = path.join(skillsRoot, entry.name);
+            const skillManifestPath = path.join(skillDir, 'SKILL.md');
+            if (!fs.existsSync(skillManifestPath)) continue;
+
+            const frontmatterName = this.extractFrontmatterName(skillManifestPath);
+            if (!frontmatterName) continue;
+            if (wanted.has(frontmatterName.toLowerCase())) {
+                return skillDir;
+            }
+        }
+        return null;
     }
 
     /**
@@ -290,7 +346,7 @@ export class ClawHubService {
     /**
      * List installed skills
      */
-    async listInstalled(): Promise<Array<{ slug: string; version: string }>> {
+    async listInstalled(): Promise<ClawHubInstalledSkillResult[]> {
         try {
             const output = await this.runCommand(['list']);
             if (!output || output.includes('No installed skills')) {
@@ -302,40 +358,59 @@ export class ClawHubService {
                 const cleanLine = this.stripAnsi(line);
                 const match = cleanLine.match(/^(\S+)\s+v?(\d+\.\S+)/);
                 if (match) {
+                    const slug = match[1];
                     return {
-                        slug: match[1],
+                        slug,
                         version: match[2],
+                        source: 'openclaw-managed',
+                        baseDir: path.join(this.workDir, 'skills', slug),
                     };
                 }
                 return null;
-            }).filter((s): s is { slug: string; version: string } => s !== null);
+            }).filter((s): s is ClawHubInstalledSkillResult => s !== null);
         } catch (error) {
             console.error('ClawHub list error:', error);
             return [];
         }
     }
 
+    private resolveSkillDir(skillKeyOrSlug: string, fallbackSlug?: string, preferredBaseDir?: string): string | null {
+        const candidates = [skillKeyOrSlug, fallbackSlug]
+            .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+            .map(v => v.trim());
+        const uniqueCandidates = [...new Set(candidates)];
+        if (preferredBaseDir && preferredBaseDir.trim() && fs.existsSync(preferredBaseDir.trim())) {
+            return preferredBaseDir.trim();
+        }
+        const directSkillDir = uniqueCandidates
+            .map((id) => path.join(this.workDir, 'skills', id))
+            .find((dir) => fs.existsSync(dir));
+        return directSkillDir || this.resolveSkillDirByManifestName(uniqueCandidates);
+    }
+
     /**
      * Open skill README/manual in default editor
      */
-    async openSkillReadme(slug: string): Promise<boolean> {
-        const skillDir = path.join(this.workDir, 'skills', slug);
+    async openSkillReadme(skillKeyOrSlug: string, fallbackSlug?: string, preferredBaseDir?: string): Promise<boolean> {
+        const skillDir = this.resolveSkillDir(skillKeyOrSlug, fallbackSlug, preferredBaseDir);
 
         // Try to find documentation file
         const possibleFiles = ['SKILL.md', 'README.md', 'skill.md', 'readme.md'];
         let targetFile = '';
 
-        for (const file of possibleFiles) {
-            const filePath = path.join(skillDir, file);
-            if (fs.existsSync(filePath)) {
-                targetFile = filePath;
-                break;
+        if (skillDir) {
+            for (const file of possibleFiles) {
+                const filePath = path.join(skillDir, file);
+                if (fs.existsSync(filePath)) {
+                    targetFile = filePath;
+                    break;
+                }
             }
         }
 
         if (!targetFile) {
             // If no md file, just open the directory
-            if (fs.existsSync(skillDir)) {
+            if (skillDir) {
                 targetFile = skillDir;
             } else {
                 throw new Error('Skill directory not found');
@@ -350,5 +425,20 @@ export class ClawHubService {
             console.error('Failed to open skill readme:', error);
             throw error;
         }
+    }
+
+    /**
+     * Open skill path in file explorer
+     */
+    async openSkillPath(skillKeyOrSlug: string, fallbackSlug?: string, preferredBaseDir?: string): Promise<boolean> {
+        const skillDir = this.resolveSkillDir(skillKeyOrSlug, fallbackSlug, preferredBaseDir);
+        if (!skillDir) {
+            throw new Error('Skill directory not found');
+        }
+        const openResult = await shell.openPath(skillDir);
+        if (openResult) {
+            throw new Error(openResult);
+        }
+        return true;
     }
 }

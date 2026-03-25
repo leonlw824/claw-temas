@@ -19,7 +19,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { useChannelsStore } from '@/stores/channels';
-import { useGatewayStore } from '@/stores/gateway';
+
 import { hostApiFetch } from '@/lib/host-api';
 import { subscribeHostEvent } from '@/lib/host-events';
 import { cn } from '@/lib/utils';
@@ -47,11 +47,16 @@ interface ChannelConfigModalProps {
   configuredTypes?: string[];
   showChannelName?: boolean;
   allowExistingConfig?: boolean;
+  allowEditAccountId?: boolean;
+  existingAccountIds?: string[];
+  initialConfigValues?: Record<string, string>;
+  agentId?: string;
+  accountId?: string;
   onClose: () => void;
   onChannelSaved?: (channelType: ChannelType) => void | Promise<void>;
 }
 
-const inputClasses = 'h-[44px] rounded-xl font-mono text-[13px] bg-[#eeece3] dark:bg-[#151514] border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40';
+const inputClasses = 'h-[44px] rounded-xl font-mono text-[13px] bg-[#eeece3] dark:bg-muted border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40';
 const labelClasses = 'text-[14px] text-foreground/80 font-bold';
 const outlineButtonClasses = 'h-9 text-[13px] font-medium rounded-full px-4 border-black/10 dark:border-white/10 bg-transparent hover:bg-black/5 dark:hover:bg-white/5 shadow-none text-foreground/80 hover:text-foreground';
 const primaryButtonClasses = 'h-9 text-[13px] font-medium rounded-full px-4 shadow-none';
@@ -61,6 +66,11 @@ export function ChannelConfigModal({
   configuredTypes = [],
   showChannelName = true,
   allowExistingConfig = true,
+  allowEditAccountId = false,
+  existingAccountIds = [],
+  initialConfigValues,
+  agentId,
+  accountId,
   onClose,
   onChannelSaved,
 }: ChannelConfigModalProps) {
@@ -69,6 +79,7 @@ export function ChannelConfigModal({
   const [selectedType, setSelectedType] = useState<ChannelType | null>(initialSelectedType);
   const [configValues, setConfigValues] = useState<Record<string, string>>({});
   const [channelName, setChannelName] = useState('');
+  const [accountIdInput, setAccountIdInput] = useState(accountId || '');
   const [connecting, setConnecting] = useState(false);
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
   const [qrCode, setQrCode] = useState<string | null>(null);
@@ -83,10 +94,18 @@ export function ChannelConfigModal({
   } | null>(null);
 
   const meta: ChannelMeta | null = selectedType ? CHANNEL_META[selectedType] : null;
+  const shouldUseCredentialValidation = selectedType !== 'feishu';
+  const resolvedAccountId = allowEditAccountId
+    ? accountIdInput.trim()
+    : (accountId ?? (agentId ? (agentId === 'main' ? 'default' : agentId) : undefined));
 
   useEffect(() => {
     setSelectedType(initialSelectedType);
   }, [initialSelectedType]);
+
+  useEffect(() => {
+    setAccountIdInput(accountId || '');
+  }, [accountId]);
 
   useEffect(() => {
     if (!selectedType) {
@@ -96,7 +115,7 @@ export function ChannelConfigModal({
       setValidationResult(null);
       setQrCode(null);
       setConnecting(false);
-      hostApiFetch('/api/channels/whatsapp/cancel', { method: 'POST' }).catch(() => {});
+      hostApiFetch('/api/channels/whatsapp/cancel', { method: 'POST' }).catch(() => { });
       return;
     }
 
@@ -109,14 +128,23 @@ export function ChannelConfigModal({
       return;
     }
 
+    if (initialConfigValues) {
+      setConfigValues(initialConfigValues);
+      setIsExistingConfig(Object.keys(initialConfigValues).length > 0);
+      setLoadingConfig(false);
+      setChannelName(showChannelName ? CHANNEL_NAMES[selectedType] : '');
+      return;
+    }
+
     let cancelled = false;
     setLoadingConfig(true);
     setChannelName(showChannelName ? CHANNEL_NAMES[selectedType] : '');
 
     (async () => {
       try {
+        const accountParam = resolvedAccountId ? `?accountId=${encodeURIComponent(resolvedAccountId)}` : '';
         const result = await hostApiFetch<{ success: boolean; values?: Record<string, string> }>(
-          `/api/channels/config/${encodeURIComponent(selectedType)}`
+          `/api/channels/config/${encodeURIComponent(selectedType)}${accountParam}`
         );
         if (cancelled) return;
 
@@ -140,7 +168,7 @@ export function ChannelConfigModal({
     return () => {
       cancelled = true;
     };
-  }, [allowExistingConfig, configuredTypes, selectedType, showChannelName]);
+  }, [allowExistingConfig, configuredTypes, initialConfigValues, resolvedAccountId, selectedType, showChannelName]);
 
   useEffect(() => {
     if (selectedType && !loadingConfig && showChannelName && firstInputRef.current) {
@@ -183,14 +211,22 @@ export function ChannelConfigModal({
       try {
         const saveResult = await hostApiFetch<{ success?: boolean; error?: string }>('/api/channels/config', {
           method: 'POST',
-          body: JSON.stringify({ channelType: 'whatsapp', config: { enabled: true } }),
+          body: JSON.stringify({ channelType: 'whatsapp', config: { enabled: true }, accountId: resolvedAccountId }),
         });
         if (!saveResult?.success) {
           throw new Error(saveResult?.error || 'Failed to save WhatsApp config');
         }
 
-        await finishSave('whatsapp');
-        useGatewayStore.getState().restart().catch(console.error);
+        try {
+          await finishSave('whatsapp');
+        } catch (postSaveError) {
+          toast.warning(t('toast.savedButRefreshFailed'));
+          console.warn('Channel saved but post-save refresh failed:', postSaveError);
+        }
+        // Gateway restart is already triggered by scheduleGatewayChannelRestart
+        // in the POST /api/channels/config route handler (debounced).  Calling
+        // restart() here directly races with that debounced restart and the
+        // config write, which can cause openclaw.json overwrites.
         onClose();
       } catch (error) {
         toast.error(t('toast.configFailed', { error: String(error) }));
@@ -213,12 +249,12 @@ export function ChannelConfigModal({
       removeQrListener();
       removeSuccessListener();
       removeErrorListener();
-      hostApiFetch('/api/channels/whatsapp/cancel', { method: 'POST' }).catch(() => {});
+      hostApiFetch('/api/channels/whatsapp/cancel', { method: 'POST' }).catch(() => { });
     };
-  }, [selectedType, finishSave, onClose, t]);
+  }, [finishSave, onClose, resolvedAccountId, selectedType, t]);
 
   const handleValidate = async () => {
-    if (!selectedType) return;
+    if (!selectedType || !shouldUseCredentialValidation) return;
 
     setValidating(true);
     setValidationResult(null);
@@ -266,15 +302,30 @@ export function ChannelConfigModal({
     setValidationResult(null);
 
     try {
+      if (allowEditAccountId) {
+        const nextAccountId = accountIdInput.trim();
+        if (!nextAccountId) {
+          toast.error(t('account.invalidId'));
+          setConnecting(false);
+          return;
+        }
+        const duplicateExists = existingAccountIds.some((id) => id === nextAccountId && id !== (accountId || '').trim());
+        if (duplicateExists) {
+          toast.error(t('account.accountIdExists', { accountId: nextAccountId }));
+          setConnecting(false);
+          return;
+        }
+      }
+
       if (meta.connectionType === 'qr') {
         await hostApiFetch('/api/channels/whatsapp/start', {
           method: 'POST',
-          body: JSON.stringify({ accountId: 'default' }),
+          body: JSON.stringify({ accountId: resolvedAccountId || 'default' }),
         });
         return;
       }
 
-      if (meta.connectionType === 'token') {
+      if (meta.connectionType === 'token' && shouldUseCredentialValidation) {
         const validationResponse = await hostApiFetch<{
           success: boolean;
           valid?: boolean;
@@ -318,7 +369,7 @@ export function ChannelConfigModal({
         warning?: string;
       }>('/api/channels/config', {
         method: 'POST',
-        body: JSON.stringify({ channelType: selectedType, config }),
+        body: JSON.stringify({ channelType: selectedType, config, accountId: resolvedAccountId }),
       });
       if (!saveResult?.success) {
         throw new Error(saveResult?.error || 'Failed to save channel config');
@@ -327,7 +378,12 @@ export function ChannelConfigModal({
         toast.warning(saveResult.warning);
       }
 
-      await finishSave(selectedType);
+      try {
+        await finishSave(selectedType);
+      } catch (postSaveError) {
+        toast.warning(t('toast.savedButRefreshFailed'));
+        console.warn('Channel saved but post-save refresh failed:', postSaveError);
+      }
 
       toast.success(t('toast.channelSaved', { name: meta.name }));
       toast.success(t('toast.channelConnecting', { name: meta.name }));
@@ -369,9 +425,17 @@ export function ChannelConfigModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <Card
-        className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-3xl border-0 shadow-2xl bg-[#f3f1e9] dark:bg-[#1a1a19] overflow-hidden"
+        className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-3xl border-0 shadow-2xl bg-[#f3f1e9] dark:bg-card overflow-hidden"
+        onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
       >
         <CardHeader className="flex flex-row items-start justify-between pb-2 shrink-0">
@@ -409,7 +473,7 @@ export function ChannelConfigModal({
                     key={type}
                     onClick={() => setSelectedType(type)}
                     className={cn(
-                      'group flex items-start gap-4 p-4 rounded-2xl transition-all text-left border relative overflow-hidden bg-[#eeece3] dark:bg-[#151514] shadow-sm',
+                      'group flex items-start gap-4 p-4 rounded-2xl transition-all text-left border relative overflow-hidden bg-[#eeece3] dark:bg-muted shadow-sm',
                       isConfigured
                         ? 'border-green-500/40 bg-green-500/5 dark:bg-green-500/10'
                         : 'border-black/5 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5'
@@ -448,7 +512,7 @@ export function ChannelConfigModal({
             </div>
           ) : qrCode ? (
             <div className="text-center space-y-6">
-              <div className="bg-[#eeece3] dark:bg-[#151514] p-4 rounded-3xl inline-block shadow-sm border border-black/10 dark:border-white/10">
+              <div className="bg-[#eeece3] dark:bg-muted p-4 rounded-3xl inline-block shadow-sm border border-black/10 dark:border-white/10">
                 {qrCode.startsWith('data:image') ? (
                   <img src={qrCode} alt="Scan QR Code" className="w-64 h-64 object-contain rounded-2xl" />
                 ) : (
@@ -474,7 +538,7 @@ export function ChannelConfigModal({
               </div>
             </div>
           ) : loadingConfig ? (
-            <div className="flex items-center justify-center py-10 rounded-2xl bg-[#eeece3] dark:bg-[#151514] border border-black/10 dark:border-white/10">
+            <div className="flex items-center justify-center py-10 rounded-2xl bg-[#eeece3] dark:bg-muted border border-black/10 dark:border-white/10">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               <span className="ml-2 text-[14px] text-muted-foreground">{t('dialog.loadingConfig')}</span>
             </div>
@@ -487,7 +551,7 @@ export function ChannelConfigModal({
                 </div>
               )}
 
-              <div className="bg-[#eeece3] dark:bg-[#151514] p-4 rounded-2xl space-y-4 shadow-sm border border-black/10 dark:border-white/10">
+              <div className="bg-[#eeece3] dark:bg-muted p-4 rounded-2xl space-y-4 shadow-sm border border-black/10 dark:border-white/10">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className={labelClasses}>{t('dialog.howToConnect')}</p>
@@ -523,6 +587,20 @@ export function ChannelConfigModal({
                     onChange={(event) => setChannelName(event.target.value)}
                     className={inputClasses}
                   />
+                </div>
+              )}
+
+              {allowEditAccountId && (
+                <div className="space-y-2.5">
+                  <Label htmlFor="account-id" className={labelClasses}>{t('account.customIdLabel')}</Label>
+                  <Input
+                    id="account-id"
+                    value={accountIdInput}
+                    onChange={(event) => setAccountIdInput(event.target.value)}
+                    placeholder={t('account.customIdPlaceholder')}
+                    className={inputClasses}
+                  />
+                  <p className="text-[12px] text-muted-foreground">{t('account.customIdHint')}</p>
                 </div>
               )}
 
@@ -591,7 +669,7 @@ export function ChannelConfigModal({
 
               <div className="flex flex-col sm:flex-row sm:justify-end gap-3 pt-2">
                 <div className="flex flex-col sm:flex-row gap-2">
-                  {meta?.connectionType === 'token' && (
+                  {meta?.connectionType === 'token' && shouldUseCredentialValidation && (
                     <Button
                       variant="outline"
                       onClick={handleValidate}
@@ -615,7 +693,7 @@ export function ChannelConfigModal({
                     onClick={() => {
                       void handleConnect();
                     }}
-                    disabled={connecting || !isFormValid()}
+                    disabled={connecting || !isFormValid() || (allowEditAccountId && !accountIdInput.trim())}
                     className={primaryButtonClasses}
                   >
                     {connecting ? (
@@ -696,7 +774,7 @@ function ConfigField({ field, value, onChange, showSecret, onToggleSecret }: Con
             variant="outline"
             size="icon"
             onClick={onToggleSecret}
-            className="h-[44px] w-[44px] rounded-xl bg-[#eeece3] dark:bg-[#151514] border-black/10 dark:border-white/10 text-muted-foreground hover:text-foreground shrink-0 shadow-sm"
+            className="h-[44px] w-[44px] rounded-xl bg-[#eeece3] dark:bg-muted border-black/10 dark:border-white/10 text-muted-foreground hover:text-foreground shrink-0 shadow-sm"
           >
             {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </Button>

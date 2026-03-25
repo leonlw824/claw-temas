@@ -2,13 +2,15 @@
   "title": "設定",
   "subtitle": "ClawTeams の体験をカスタマイズ",
   "appearance": {
-    "title": "外観",
+    "title": "通用",
     "description": "外観とスタイルをカスタマイズ",
     "theme": "テーマ",
     "light": "ライト",
     "dark": "ダーク",
     "system": "システム",
-    "language": "言語"
+    "language": "言語",
+    "launchAtStartup": "システム起動時に自動起動",
+    "launchAtStartupDesc": "ログイン時に ClawTeams を自動的に起動します"
   },
   "aiProviders": {
     "title": "AI プロバイダー",
@@ -50,6 +52,7 @@
       "replaceApiKeyHelp": "現在保存されている API キーをそのまま使う場合は、この欄を空のままにしてください。",
       "baseUrl": "ベース URL",
       "modelId": "モデル ID",
+      "protocol": "プロトコル",
       "fallbackModels": "フォールバックモデル",
       "fallbackProviders": "別プロバイダーへのフォールバック",
       "fallbackModelIds": "同一プロバイダーのフォールバックモデル ID",
@@ -60,6 +63,7 @@
       "change": "プロバイダーを変更",
       "add": "プロバイダーを追加",
       "save": "保存",
+      "customDoc": "ドキュメント",
       "validate": "検証"
     },
     "card": {
@@ -72,6 +76,12 @@
       "setDefault": "デフォルトに設定",
       "editKey": "API キーを編集",
       "delete": "プロバイダーを削除"
+    },
+    "protocols": {
+      "openai": "OpenAI 互換",
+      "openaiCompletions": "OpenAI Completions",
+      "openaiResponses": "OpenAI Responses",
+      "anthropic": "Anthropic 互換"
     },
     "toast": {
       "added": "プロバイダーが正常に追加されました",
@@ -206,6 +216,29 @@
     "cliPowershell": "PowerShell コマンド。",
     "cmdUnavailable": "コマンドが利用できません",
     "cmdCopied": "CLI コマンドをコピーしました",
+    "doctor": "OpenClaw Doctor",
+    "doctorDesc": "`openclaw doctor` を実行して診断の生出力を確認します。",
+    "runDoctor": "Doctor を実行",
+    "runDoctorFix": "Doctor 修復を実行",
+    "doctorSucceeded": "OpenClaw doctor が完了しました",
+    "doctorFailed": "OpenClaw doctor が問題を報告しました",
+    "doctorRunFailed": "OpenClaw doctor の実行に失敗しました",
+    "doctorFixSucceeded": "OpenClaw doctor 修復が完了しました",
+    "doctorFixFailed": "OpenClaw doctor 修復後も問題が残っています",
+    "doctorFixRunFailed": "OpenClaw doctor 修復の実行に失敗しました",
+    "doctorCopied": "診断出力をコピーしました",
+    "doctorOk": "正常",
+    "doctorIssue": "問題あり",
+    "doctorFixOk": "修復済み",
+    "doctorFixIssue": "修復失敗",
+    "doctorExitCode": "終了コード",
+    "doctorDuration": "所要時間",
+    "doctorCommand": "コマンド",
+    "doctorWorkingDir": "作業ディレクトリ",
+    "doctorError": "エラー",
+    "doctorStdout": "標準出力",
+    "doctorStderr": "標準エラー",
+    "doctorOutputEmpty": "（空）",
     "wsDiagnostic": "WS 診断モード",
     "wsDiagnosticDesc": "Gateway RPC デバッグのため一時的に WS/HTTP フォールバックを有効化します。",
     "wsDiagnosticEnabled": "WS 診断モードを有効化しました",
@@ -232,6 +265,7 @@
     "basedOn": "OpenClaw ベース",
     "version": "バージョン {{version}}",
     "docs": "公式サイト",
-    "github": "GitHub"
+    "github": "GitHub",
+    "faq": "よくある質問"
   }
 }

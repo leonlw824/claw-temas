@@ -1,6 +1,6 @@
 appId: app.clawx.desktop
-productName: ClawX
-copyright: Copyright © 2026 ClawX
+productName: ClawTeams
+copyright: Copyright © 2026 ClawTeams
 compression: maximum
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 
@@ -26,6 +26,9 @@ extraResources:
   # because electron-builder respects .gitignore which excludes node_modules/)
   - from: build/openclaw/
     to: openclaw/
+  # Pre-bundled third-party skills (full directories, not only SKILL.md)
+  - from: build/preinstalled-skills/
+    to: resources/preinstalled-skills/
   # NOTE: OpenClaw plugin mirrors (dingtalk, etc.) are bundled by the
   # afterPack hook (after-pack.cjs) directly from node_modules, so they
   # don't need an extraResources entry here.
@@ -79,8 +82,8 @@ mac:
   entitlementsInherit: entitlements.mac.plist
   notarize: true
   extendInfo:
-    NSMicrophoneUsageDescription: ClawX requires microphone access for voice features
-    NSCameraUsageDescription: ClawX requires camera access for video features
+    NSMicrophoneUsageDescription: ClawTeams requires microphone access for voice features
+    NSCameraUsageDescription: ClawTeams requires camera access for video features
 
 dmg:
   background: resources/dmg-background.png
@@ -100,9 +103,9 @@ dmg:
 
 # Windows Configuration
 win:
-  forceCodeSigning: false
+  # Skip update signature verification: we ship via OSS + GitHub without a
+  # code-signing certificate, so verifying would always fail on the updater.
   verifyUpdateCodeSignature: false
-  signAndEditExecutable: true
   extraResources:
     - from: resources/bin/win32-${arch}
       to: bin
@@ -111,9 +114,9 @@ win:
   icon: resources/icons/icon.ico
   target:
     - target: nsis
-      arch:
-        - x64
-        - arm64
+      arch: x64
+    - target: nsis
+      arch: arm64
 
 nsis:
   oneClick: false
@@ -124,8 +127,8 @@ nsis:
   differentialPackage: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: ClawX
-  uninstallDisplayName: ClawX
+  shortcutName: ClawTeams
+  uninstallDisplayName: ClawTeams
   license: LICENSE
   include: scripts/installer.nsh
   installerIcon: resources/icons/icon.ico
@@ -155,10 +158,10 @@ linux:
   maintainer: ClawX Team <public@valuecell.ai>
   vendor: ClawX
   synopsis: AI Assistant powered by OpenClaw
-  description: ClawX is a graphical AI assistant application that integrates with OpenClaw Gateway to provide intelligent automation and assistance across multiple messaging platforms.
+  description: ClawTeams is a graphical AI assistant application that integrates with OpenClaw Gateway to provide intelligent automation and assistance across multiple messaging platforms.
   desktop:
     entry:
-      Name: ClawX
+      Name: ClawTeams
       Comment: AI Assistant powered by OpenClaw
       Categories: Utility;Network;
       Keywords: ai;assistant;automation;chat;

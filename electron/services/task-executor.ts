@@ -302,6 +302,7 @@ interface ChatResponseEvent {
 class AgentChatSession {
   constructor(
     private agentId: string,
+    private taskId: string,
     private gatewayManager: GatewayManager
   ) {}
 
@@ -310,7 +311,7 @@ class AgentChatSession {
     abortSignal: AbortSignal
   ): Promise<string> {
     return new Promise((resolve, reject) => {
-      const sessionKey = `agent:${this.agentId}:main`;
+      const sessionKey = `session-${this.taskId}`;
       let isAborted = false;
       let isResolved = false;
       let isFinal = false;
@@ -750,7 +751,7 @@ export class TaskExecutor extends EventEmitter {
     for (const nodeId of context.state.currentNodes) {
       const nodeResult = context.state.nodeResults[nodeId];
       if (nodeResult && nodeResult.agentId) {
-        const sessionKey = `agent:${nodeResult.agentId}:main`;
+        const sessionKey = `session-${taskId}`;
         this.gatewayManager.rpc('chat.abort', { sessionKey }).catch((err) => {
           logger.warn('Failed to abort chat session:', err);
         });
@@ -1136,7 +1137,7 @@ Please carefully review the feedback above and revise your work accordingly. As 
 
       // Always create a new session for each message to avoid event listener conflicts
       // But use the same sessionKey to maintain conversation continuity
-      const session = new AgentChatSession(node.agentId, this.gatewayManager);
+      const session = new AgentChatSession(node.agentId, context.taskId, this.gatewayManager);
       const output = await session.sendMessageAndWaitForReply(
         message,
         abortController.signal
